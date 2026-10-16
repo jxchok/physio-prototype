@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>APP_NAME — Physiotherapy Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header><div class="wrap top"><div class="brand">APP_NAME</div><span class="top-note">Physiotherapy tracker · First draft</span></div></header>
+  <main class="wrap">
+    <h1>My Physiotherapy Plan</h1>
+    <p class="sub">Track your prescribed exercises, stay on schedule, and see your progress.</p>
+    <div class="layout">
+      <div class="stack">
+        <section class="card" aria-labelledby="today-heading">
+          <div class="card-head"><h2 id="today-heading">Today's exercises</h2><span class="date" id="date-display"></span></div>
+          <div class="stats">
+            <div class="stat"><strong id="done-count">0/0</strong><small>Exercises checked off today</small></div>
+            <div class="stat"><strong id="streak-count">0 days</strong><small>Current completion streak</small></div>
+          </div>
+          <div class="track-label"><span>Today's progress</span><span id="progress-percent">0%</span></div>
+          <div class="track"><span id="progress-bar"></span></div>
+          <div class="session"><div class="session-title">Morning <span class="session-count" id="morning-count"></span></div><div id="morning-exercises"></div></div>
+          <div class="session"><div class="session-title">Evening <span class="session-count" id="evening-count"></span></div><div id="evening-exercises"></div></div>
+        </section>
+        <section class="card" aria-labelledby="manage-heading">
+          <div class="card-head"><h2 id="manage-heading">My exercises</h2><button class="btn" id="add-btn" type="button">+ Add exercise</button></div>
+          <p class="section-note">Enter the exercises given by your physiotherapist. Choose when you plan to do each one.</p>
+          <form id="exercise-form" class="form" hidden>
+            <div class="form-grid">
+              <label class="field">Exercise name <input id="exercise-name" maxlength="80" required placeholder="e.g. Exercise A" /></label>
+              <label class="field">Schedule <select id="exercise-schedule"><option value="both">Morning & evening</option><option value="morning">Morning only</option><option value="evening">Evening only</option></select></label>
+              <label class="field">Notes (optional) <textarea id="exercise-notes" maxlength="400" placeholder="Instructions provided by your physiotherapist"></textarea></label>
+            </div>
+            <div class="form-actions"><button type="submit" class="btn" id="save-btn">Save exercise</button><button type="button" class="btn btn-secondary" id="cancel-btn">Cancel</button></div>
+          </form>
+          <div id="manage-list"></div>
+        </section>
+      </div>
+      <div class="stack">
+        <section class="card" aria-labelledby="reminder-heading">
+          <div class="card-head"><h2 id="reminder-heading">Reminders</h2></div>
+          <label class="toggle-row"><input id="morning-on" type="checkbox" /> Morning reminder</label>
+          <div class="time-line"><label for="morning-time">Time</label><input type="time" id="morning-time" value="09:00" /></div>
+          <label class="toggle-row"><input id="evening-on" type="checkbox" /> Evening reminder</label>
+          <div class="time-line"><label for="evening-time">Time</label><input type="time" id="evening-time" value="20:00" /></div>
+          <button type="button" class="btn btn-secondary" id="notification-btn">Enable browser notifications</button>
+          <p class="muted" id="notification-status">Reminders appear while this page is open. Browser notifications require permission; they do not run after this page is closed.</p>
+        </section>
+        <section class="card" aria-labelledby="motivation-heading">
+          <div class="card-head"><h2 id="motivation-heading">A little motivation</h2></div>
+          <div class="quote" id="quote-text"></div>
+          <button type="button" class="btn btn-secondary" id="new-quote">Another quote</button>
+          <label class="toggle-row quote-toggle"><input id="hourly-on" type="checkbox" /> Hourly encouragement (while page is open)</label>
+        </section>
+      </div>
+    </div>
+    <p class="footnote">First draft · Saved locally in this browser · This tracker does not check exercise technique or replace advice from your physiotherapist.</p>
+  </main>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="script.js" defer></script>
+</body>
+</html>
