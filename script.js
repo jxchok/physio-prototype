@@ -228,10 +228,11 @@
       const tally = counts(key);
       const future = key > dateKey();
       const scheduled = state.sessions.filter(session => sessionExercises(session.id, key).length);
-      const restOrComplete = scheduled.length > 0 && scheduled.every(session =>
-        sessionIsPaused(session.id, key) || sessionExercises(session.id, key).every(ex => done(key, ex.id, session.id)));
-      const kind = future || !tally.total ? 'empty' : tally.completed === tally.total ? 'completed'
-        : restOrComplete ? 'paused' : tally.completed ? 'partial' : key < dateKey() ? 'missed' : 'empty';
+      // A paused session should be visible even if other sessions remain unfinished.
+      const anyPaused = scheduled.some(session => sessionIsPaused(session.id, key));
+      const kind = future || !tally.total ? 'empty' : anyPaused ? 'paused'
+        : tally.completed === tally.total ? 'completed'
+        : tally.completed ? 'partial' : key < dateKey() ? 'missed' : 'empty';
       html += `<button type="button" class="calendar-day ${kind} ${key === dateKey() ? 'is-today' : ''} ${key === calendarSelected ? 'selected' : ''}" data-day="${key}" aria-label="${escapeHtml(key)}: ${tally.completed} of ${tally.total} exercises completed" aria-pressed="${key === calendarSelected}">${day}</button>`;
     }
     $('calendar-grid').innerHTML = html;
