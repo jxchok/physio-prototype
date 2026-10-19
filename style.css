@@ -129,11 +129,12 @@ input.clock-input {
 .period-buttons button.active {background:#2c5c90; color:#fff; border-color:#2c5c90;}
 .time-picker-body {padding:10px 16px 1px; display:grid; justify-items:center;}
 .time-picker-hint {margin:2px 0 10px; font-size:.78rem; color:#6b7889; text-align:center; min-height:1.3em;}
-.clock-face {width:min(280px, calc(100vw - 60px)); aspect-ratio:1; position:relative; border-radius:50%; background:#edf2f8; touch-action:none; user-select:none;}
+.clock-face {width:min(280px, calc(100vw - 60px)); aspect-ratio:1; position:relative; border-radius:50%; background:#edf2f8; touch-action:none; user-select:none; cursor:grab;}
+.clock-face.dragging {cursor:grabbing;}
 .clock-hand {position:absolute; width:100%; height:100%; pointer-events:none; color:#2c5c90;}
 .clock-hand line {stroke:currentColor; stroke-width:2.5;}
 .clock-hand circle {fill:currentColor;}
-.clock-number {position:absolute; transform:translate(-50%,-50%); border:0; border-radius:50%; background:transparent; color:#2e3b4d; display:grid; place-items:center; width:38px; height:38px; font-size:.91rem; font-weight:600; font-variant-numeric:tabular-nums; padding:0;}
+.clock-number {position:absolute; transform:translate(-50%,-50%); border:0; border-radius:50%; background:transparent; color:#2e3b4d; display:grid; place-items:center; width:38px; height:38px; font-size:.91rem; font-weight:600; font-variant-numeric:tabular-nums; padding:0; touch-action:none; cursor:inherit;}
 .clock-number:hover,.clock-number:focus-visible {background:#d5e5f4;}
 .clock-number.selected {background:#2c5c90; color:white;}
 .time-picker-actions {display:flex; justify-content:flex-end; gap:9px; padding:17px 20px 20px;}

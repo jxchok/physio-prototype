@@ -446,7 +446,7 @@
       $(id).setAttribute('aria-pressed', String(chosenTime.period === period));
     }
     const choosingHours = chosenTime.view === 'hour';
-    $('time-picker-hint').textContent = choosingHours ? 'Choose an hour' : 'Choose a minute (tap between labels for exact minutes)';
+    $('time-picker-hint').textContent = choosingHours ? 'Drag the hand or tap to choose an hour' : 'Drag the hand or tap to choose a minute (even between labels)';
     const indicator = choosingHours ? chosenTime.hour % 12 : chosenTime.minute;
     const angle = indicator * Math.PI / (choosingHours ? 6 : 30);
     const handX = 140 + 102 * Math.sin(angle), handY = 140 - 102 * Math.cos(angle);
@@ -491,23 +491,73 @@
   for (const period of ['am', 'pm']) {
     $(`pick-${period}`).addEventListener('click', () => { chosenTime.period = period; renderClock(); });
   }
-  clockFace.addEventListener('click', event => {
-    const button = event.target.closest('.clock-number');
-    if (button) chooseDialValue(Number(button.dataset.clockValue));
-  });
-  // The ring accepts arbitrary minutes, e.g. 08:47, rather than only multiples of 5.
-  clockFace.addEventListener('pointerdown', event => {
-    if (!chosenTime || event.target.closest('.clock-number')) return;
+  // Both mouse and touch can drag the hand. Pointer capture stays on the stable
+  // clock-face element even while its dial labels are re-rendered during a drag.
+  let activeClockDrag = null;
+  function valueFromPointer(event, allowOutside = false) {
     const rect = clockFace.getBoundingClientRect();
     const dx = event.clientX - (rect.left + rect.width / 2);
     const dy = event.clientY - (rect.top + rect.height / 2);
     const radius = Math.hypot(dx, dy);
-    if (radius < rect.width * 0.17 || radius > rect.width * 0.5) return;
-    const around = (Math.atan2(dx, -dy) + 2 * Math.PI) % (2 * Math.PI);
+    // Don't start a drag in the middle or far outside the clock face.
+    if (!allowOutside && (radius < rect.width * 0.10 || radius > rect.width * 0.53)) return null;
+    if (radius < rect.width * 0.06) return null;
+    const angle = (Math.atan2(dx, -dy) + 2 * Math.PI) % (2 * Math.PI);
     const steps = chosenTime.view === 'hour' ? 12 : 60;
-    let value = Math.round(around / (2 * Math.PI) * steps) % steps;
-    if (chosenTime.view === 'hour' && value === 0) value = 12;
-    chooseDialValue(value);
+    const value = Math.round(angle / (2 * Math.PI) * steps) % steps;
+    return chosenTime.view === 'hour' ? (value || 12) : value;
+  }
+  function previewClockPointer(event, allowOutside = false) {
+    if (!chosenTime) return;
+    const value = valueFromPointer(event, allowOutside);
+    if (value === null) return;
+    const field = chosenTime.view === 'hour' ? 'hour' : 'minute';
+    if (chosenTime[field] !== value) {
+      chosenTime[field] = value;
+      renderClock();
+    }
+  }
+  clockFace.addEventListener('pointerdown', event => {
+    if (!chosenTime || activeClockDrag || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    const value = valueFromPointer(event);
+    if (value === null) return;
+    activeClockDrag = {
+      pointerId: event.pointerId,
+      field: chosenTime.view === 'hour' ? 'hour' : 'minute',
+      originalValue: chosenTime[chosenTime.view === 'hour' ? 'hour' : 'minute']
+    };
+    clockFace.setPointerCapture(event.pointerId);
+    clockFace.classList.add('dragging');
+    event.preventDefault(); // Prevent text selection and synthetic clicks.
+    previewClockPointer(event);
+  });
+  clockFace.addEventListener('pointermove', event => {
+    if (activeClockDrag?.pointerId !== event.pointerId) return;
+    previewClockPointer(event, true);
+  });
+  clockFace.addEventListener('pointerup', event => {
+    if (activeClockDrag?.pointerId !== event.pointerId) return;
+    previewClockPointer(event, true);
+    const wasHour = activeClockDrag.field === 'hour';
+    activeClockDrag = null;
+    clockFace.classList.remove('dragging');
+    if (clockFace.hasPointerCapture(event.pointerId)) clockFace.releasePointerCapture(event.pointerId);
+    // Let the user drag for hours, then drag for minutes. Minutes can be exact 0–59.
+    if (wasHour) chosenTime.view = 'minute';
+    renderClock();
+  });
+  clockFace.addEventListener('pointercancel', event => {
+    if (activeClockDrag?.pointerId !== event.pointerId) return;
+    chosenTime[activeClockDrag.field] = activeClockDrag.originalValue;
+    activeClockDrag = null;
+    clockFace.classList.remove('dragging');
+    renderClock();
+  });
+  // Preserve keyboard accessibility for the 12 hour/minute label buttons.
+  clockFace.addEventListener('click', event => {
+    if (event.detail !== 0 || activeClockDrag) return; // Pointer input is handled above.
+    const button = event.target.closest('.clock-number');
+    if (button) chooseDialValue(Number(button.dataset.clockValue));
   });
   $('cancel-clock').addEventListener('click', () => clockDialog.close());
   $('save-clock').addEventListener('click', () => {
@@ -521,6 +571,8 @@
     if (event.target === clockDialog) clockDialog.close();
   });
   clockDialog.addEventListener('close', () => {
+    activeClockDrag = null;
+    clockFace.classList.remove('dragging');
     const focusTarget = chosenTime?.target;
     chosenTime = null;
     if (focusTarget?.isConnected) focusTarget.focus();
@@ -590,7 +642,7 @@
       const key = `${dateKey()}_${pause.dataset.session}`;
       if (state.paused[key]) delete state.paused[key];
       else state.paused[key] = true;
-      save(); renderReminders();
+      save(); renderReminders(); renderCalendar();
       showToast(state.paused[key] ? 'Reminders paused for today.' : 'Reminders resumed.');
     }
   });
@@ -731,7 +783,7 @@
       save(); $('buddy-dialog').close(); showToast(`Reminders snoozed for ${amount} minutes.`);
     } else if (button.classList.contains('buddy-pause')) {
       state.paused[`${dateKey()}_${buddySessionId}`] = true;
-      save(); renderReminders(); $('buddy-dialog').close(); showToast('Reminders paused for this session today.');
+      save(); renderReminders(); renderCalendar(); $('buddy-dialog').close(); showToast('Reminders paused for this session today.');
     } else if (button.classList.contains('buddy-view')) {
       $('buddy-dialog').close(); $('today-card').scrollIntoView({behavior:'smooth',block:'start'});
     } else if (button.classList.contains('buddy-contact')) {
