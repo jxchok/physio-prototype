@@ -6,9 +6,13 @@
     button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible {outline:3px solid #a0bbeb; outline-offset:2px;}
     header {border-bottom:1px solid #e3e8ee; background:white;}
     .wrap {width:min(100% - 36px,1010px); margin-inline:auto;}
-    .top {min-height:77px; display:flex; justify-content:space-between; align-items:center; gap:12px;}
+    .top {min-height:91px; display:grid; grid-template-columns:minmax(215px,.9fr) minmax(0,1.7fr); align-items:center; gap:28px;}
+    .header-identity {display:flex; flex-direction:column; justify-content:center; min-width:0;}
     .brand {font-size:1.45rem; font-weight:760; letter-spacing:-.035em;}
-    .top-note {font-size:.86rem; color:#667383;}
+    .top-note {font-size:.82rem; color:#667383;}
+    .header-motivation {min-width:0; min-height:3em; display:flex; justify-content:center; align-items:center; gap:4px; text-align:center; font-size:.94rem; font-style:italic; font-weight:500; line-height:1.5; color:#4a6280;}
+    .header-motivation #quote-text {max-width:560px; text-wrap:balance;}
+    .quote-mark {font-size:1.3rem; font-style:normal; font-weight:700; color:#7290b1; line-height:1;}
     main {padding:34px 0 58px;}
     h1 {font-size:clamp(1.5rem,3vw,2rem); letter-spacing:-.04em; margin:0 0 4px;}
     h2 {font-size:1.05rem; letter-spacing:-.014em; margin:0;}
@@ -59,12 +63,78 @@
     .time-line label {font-size:.88rem; font-weight:600;}
     input[type=time] {border:1px solid #cfd9e4; border-radius:7px; padding:7px 9px; background:white; min-width:118px;}
     .muted {color:#758190; font-size:.78rem; margin:9px 0 0;}
-    .quote {background:#f6f8fc; padding:16px; border-radius:9px; font-size:.94rem; margin:0 0 13px;}
-    .quote:before {content:'“'; color:#6b8ab4; font-weight:700; font-size:1.2rem;}
-    .quote:after {content:'”'; color:#6b8ab4; font-weight:700; font-size:1.2rem;}
     .footnote {color:#788492; font-size:.8rem; margin-top:24px;}
     #toast {position:fixed; bottom:20px; right:20px; z-index:50; padding:13px 16px; max-width:330px; border:1px solid #bed3e5; border-radius:10px; background:#f4f9ff; color:#213a57; box-shadow:0 9px 30px #24344929; font-size:.9rem;}
     #toast[hidden],[hidden] {display:none!important;}
-    @media(max-width:740px){.layout{grid-template-columns:1fr;} .card{padding:17px;} .wrap{width:min(100% - 26px,1010px);} main{padding-top:24px;} .top-note{display:none;} .stats{gap:9px;} .stat{padding:12px;} #toast{left:14px;right:14px;max-width:none;}}
+    @media(max-width:740px){.layout{grid-template-columns:1fr;} .card{padding:17px;} .wrap{width:min(100% - 26px,1010px);} main{padding-top:24px;} .top{grid-template-columns:1fr; gap:8px; padding:13px 0 15px;} .header-identity{align-items:center;} .header-motivation{min-height:0; border-top:1px solid #edf1f5; padding-top:9px; font-size:.86rem;} .stats{gap:9px;} .stat{padding:12px;} #toast{left:14px;right:14px;max-width:none;}}
     .manage-actions {display:flex; flex-shrink:0; gap:5px;}
     .quote-toggle {margin-top:17px;}
+
+/* Prototype v2: custom sessions and reminder preview */
+.two-fields {grid-template-columns:repeat(2,minmax(0,1fr));}
+.session-picker {border:1px solid #dce5ee; border-radius:8px; padding:8px 12px 12px; margin:0; min-width:0;}
+.session-picker legend {font-size:.83rem; font-weight:600; padding:0 4px;}
+.session-picker .toggle-row {margin:7px 0;}
+.reminder-session {border:1px solid #e0e6ed; border-radius:10px; padding:14px; margin:14px 0; background:#fbfcfe;}
+.reminder-session-heading {display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:13px;}
+.reminder-session-heading strong {font-size:.94rem;}
+.reminder-session .form-grid {column-gap:10px; row-gap:11px;}
+.reminder-session .field input,.reminder-session .field select {min-width:0; width:100%;}
+.reminder-session .field input[type=time] {padding:9px 10px;}
+.reminder-actions {flex-wrap:wrap; align-items:center;}
+.reminder-actions .btn-quiet {padding:8px 4px;}
+.notification-actions {display:flex; gap:9px; flex-wrap:wrap; margin-top:15px;}
+.notification-preview {position:fixed; z-index:100; top:18px; right:18px; width:min(375px,calc(100% - 28px)); padding:15px 17px; border:1px solid #c2d4e7; border-radius:13px; background:#fff; color:#213244; box-shadow:0 16px 45px rgba(32,51,73,.22);}
+.preview-heading {display:flex; align-items:center; justify-content:space-between; gap:12px;}
+.preview-heading strong {font-size:.92rem;}
+.notification-preview p {font-size:.88rem; line-height:1.45; margin:9px 0 10px;}
+.close-preview {font-size:1.4rem; padding:0 5px; border:0; background:transparent; color:#657484; line-height:1;}
+.preview-link {background:transparent; border:0; color:#2c5c90; font-size:.83rem; font-weight:650; padding:4px 0;}
+.preview-link:hover {text-decoration:underline;}
+.paused-note {color:#7d6332;}
+.btn-quiet:disabled {opacity:.35; cursor:not-allowed; text-decoration:none;}
+@media(max-width:450px){.two-fields{grid-template-columns:1fr;} .notification-preview{top:12px;right:14px;left:14px;width:auto;}}
+
+/* v3: consistent circular time picker, replacing browser-dependent HH:mm fields. */
+input.clock-input {
+  padding: 9px 39px 9px 11px !important;
+  background: #fff !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 24 24' fill='none' stroke='%23506883' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+  background-size: 19px 19px !important;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .035em;
+}
+.time-picker {
+  width: min(360px, calc(100vw - 28px));
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  border: none;
+  border-radius: 18px;
+  background: white;
+  box-shadow: 0 18px 75px #152b4970;
+  color: #273b52;
+  overflow: auto;
+}
+.time-picker::backdrop { background: rgba(17, 30, 48, .5); }
+.time-picker-title {padding: 15px 22px 10px; font-size:.85rem; font-weight:650;}
+.time-picker-top {background:#edf3fa; display:flex; align-items:center; justify-content:space-between; gap:7px; padding:14px 19px;}
+.time-picker-readout {font-size:2.5rem; font-weight:700; display:flex; align-items:center; gap:0; letter-spacing:-.04em;}
+.time-part {padding:3px 5px; background:transparent; border:0; border-radius:8px; color:#7b8ca3; font-variant-numeric:tabular-nums; font-weight:inherit;}
+.time-part.active {background:#2c5c90; color:white;}
+.period-buttons {display:grid; gap:5px;}
+.period-buttons button {border:1px solid #c3d1e0; color:#5c6e82; background:white; font-size:.73rem; font-weight:700; padding:5px 9px; border-radius:6px;}
+.period-buttons button.active {background:#2c5c90; color:#fff; border-color:#2c5c90;}
+.time-picker-body {padding:10px 16px 1px; display:grid; justify-items:center;}
+.time-picker-hint {margin:2px 0 10px; font-size:.78rem; color:#6b7889; text-align:center; min-height:1.3em;}
+.clock-face {width:min(280px, calc(100vw - 60px)); aspect-ratio:1; position:relative; border-radius:50%; background:#edf2f8; touch-action:none; user-select:none;}
+.clock-hand {position:absolute; width:100%; height:100%; pointer-events:none; color:#2c5c90;}
+.clock-hand line {stroke:currentColor; stroke-width:2.5;}
+.clock-hand circle {fill:currentColor;}
+.clock-number {position:absolute; transform:translate(-50%,-50%); border:0; border-radius:50%; background:transparent; color:#2e3b4d; display:grid; place-items:center; width:38px; height:38px; font-size:.91rem; font-weight:600; font-variant-numeric:tabular-nums; padding:0;}
+.clock-number:hover,.clock-number:focus-visible {background:#d5e5f4;}
+.clock-number.selected {background:#2c5c90; color:white;}
+.time-picker-actions {display:flex; justify-content:flex-end; gap:9px; padding:17px 20px 20px;}
+@media (max-height:600px) { .clock-face {width:min(210px,calc(100vw - 60px));} .time-picker-body {padding-top:6px;} }

@@ -4,62 +4,139 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light" />
-  <title>APP_NAME — Physiotherapy Tracker</title>
+  <title>Physio Buddy — Physiotherapy Tracker</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="script.js" defer></script>
 </head>
 <body>
-  <header><div class="wrap top"><div class="brand">APP_NAME</div><span class="top-note">Physiotherapy tracker · First draft</span></div></header>
+  <header>
+    <div class="wrap top">
+      <div class="header-identity">
+        <div class="brand">Physio Buddy</div>
+        <span class="top-note">Physiotherapy tracker · Prototype</span>
+      </div>
+      <div class="header-motivation" aria-label="Motivational quote">
+        <span class="quote-mark" aria-hidden="true">“</span>
+        <span id="quote-text">Small steps still count.</span>
+        <span class="quote-mark" aria-hidden="true">”</span>
+      </div>
+    </div>
+  </header>
+
   <main class="wrap">
     <h1>My Physiotherapy Plan</h1>
     <p class="sub">Track your prescribed exercises, stay on schedule, and see your progress.</p>
+
     <div class="layout">
       <div class="stack">
-        <section class="card" aria-labelledby="today-heading">
-          <div class="card-head"><h2 id="today-heading">Today's exercises</h2><span class="date" id="date-display"></span></div>
+        <section class="card" aria-labelledby="today-heading" id="today-card">
+          <div class="card-head">
+            <h2 id="today-heading">Today's exercises</h2>
+            <span class="date" id="date-display"></span>
+          </div>
           <div class="stats">
             <div class="stat"><strong id="done-count">0/0</strong><small>Exercises checked off today</small></div>
             <div class="stat"><strong id="streak-count">0 days</strong><small>Current completion streak</small></div>
           </div>
           <div class="track-label"><span>Today's progress</span><span id="progress-percent">0%</span></div>
           <div class="track"><span id="progress-bar"></span></div>
-          <div class="session"><div class="session-title">Morning <span class="session-count" id="morning-count"></span></div><div id="morning-exercises"></div></div>
-          <div class="session"><div class="session-title">Evening <span class="session-count" id="evening-count"></span></div><div id="evening-exercises"></div></div>
+          <div id="today-sessions"></div>
         </section>
+
         <section class="card" aria-labelledby="manage-heading">
-          <div class="card-head"><h2 id="manage-heading">My exercises</h2><button class="btn" id="add-btn" type="button">+ Add exercise</button></div>
-          <p class="section-note">Enter the exercises given by your physiotherapist. Choose when you plan to do each one.</p>
+          <div class="card-head">
+            <h2 id="manage-heading">My exercises</h2>
+            <button class="btn" id="add-btn" type="button">+ Add exercise</button>
+          </div>
+          <p class="section-note">Enter the exercises given by your physiotherapist, then choose which sessions include them.</p>
           <form id="exercise-form" class="form" hidden>
             <div class="form-grid">
-              <label class="field">Exercise name <input id="exercise-name" maxlength="80" required placeholder="e.g. Exercise A" /></label>
-              <label class="field">Schedule <select id="exercise-schedule"><option value="both">Morning & evening</option><option value="morning">Morning only</option><option value="evening">Evening only</option></select></label>
-              <label class="field">Notes (optional) <textarea id="exercise-notes" maxlength="400" placeholder="Instructions provided by your physiotherapist"></textarea></label>
+              <label class="field">Exercise name
+                <input id="exercise-name" maxlength="80" required placeholder="e.g. Exercise A" />
+              </label>
+              <fieldset class="session-picker">
+                <legend>Include in sessions</legend>
+                <div id="exercise-session-options"></div>
+              </fieldset>
+              <label class="field">Notes (optional)
+                <textarea id="exercise-notes" maxlength="400" placeholder="Instructions from your physiotherapist"></textarea>
+              </label>
             </div>
-            <div class="form-actions"><button type="submit" class="btn" id="save-btn">Save exercise</button><button type="button" class="btn btn-secondary" id="cancel-btn">Cancel</button></div>
+            <div class="form-actions">
+              <button type="submit" class="btn" id="save-btn">Save exercise</button>
+              <button type="button" class="btn btn-secondary" id="cancel-btn">Cancel</button>
+            </div>
           </form>
           <div id="manage-list"></div>
         </section>
       </div>
+
       <div class="stack">
         <section class="card" aria-labelledby="reminder-heading">
-          <div class="card-head"><h2 id="reminder-heading">Reminders</h2></div>
-          <label class="toggle-row"><input id="morning-on" type="checkbox" /> Morning reminder</label>
-          <div class="time-line"><label for="morning-time">Time</label><input type="time" id="morning-time" value="09:00" /></div>
-          <label class="toggle-row"><input id="evening-on" type="checkbox" /> Evening reminder</label>
-          <div class="time-line"><label for="evening-time">Time</label><input type="time" id="evening-time" value="20:00" /></div>
-          <button type="button" class="btn btn-secondary" id="notification-btn">Enable browser notifications</button>
-          <p class="muted" id="notification-status">Reminders appear while this page is open. Browser notifications require permission; they do not run after this page is closed.</p>
-        </section>
-        <section class="card" aria-labelledby="motivation-heading">
-          <div class="card-head"><h2 id="motivation-heading">A little motivation</h2></div>
-          <div class="quote" id="quote-text"></div>
-          <button type="button" class="btn btn-secondary" id="new-quote">Another quote</button>
-          <label class="toggle-row quote-toggle"><input id="hourly-on" type="checkbox" /> Hourly encouragement (while page is open)</label>
+          <div class="card-head">
+            <h2 id="reminder-heading">Sessions & reminders</h2>
+            <button class="btn btn-secondary" type="button" id="add-session-btn">+ Add session</button>
+          </div>
+          <p class="section-note">Set any number of sessions per day. Reminders repeat within the time window until all exercises in that session are checked off.</p>
+          <form id="add-session-form" class="form" hidden>
+            <div class="form-grid two-fields">
+              <label class="field">Session name
+                <input id="new-session-name" placeholder="e.g. Afternoon" maxlength="40" required />
+              </label>
+              <label class="field">Exercise time
+                <input id="new-session-time" class="clock-input" type="text" inputmode="none" readonly value="14:00" required aria-haspopup="dialog" title="Choose a time using the clock" />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Add session</button>
+              <button type="button" class="btn btn-secondary" id="cancel-session-btn">Cancel</button>
+            </div>
+          </form>
+          <div id="reminder-sessions"></div>
+          <div class="notification-actions">
+            <button type="button" class="btn btn-secondary" id="notification-btn">Enable notifications</button>
+            <button type="button" class="btn" id="test-notification-btn">Test notification</button>
+          </div>
+          <label class="toggle-row quote-toggle"><input id="hourly-on" type="checkbox" /> Hourly encouragement notifications (while page is open)</label>
+          <p class="muted" id="notification-status">The test button always opens a notification preview. System notifications need browser permission and HTTPS. Timed reminders only run while this page is open.</p>
         </section>
       </div>
     </div>
-    <p class="footnote">First draft · Saved locally in this browser · This tracker does not check exercise technique or replace advice from your physiotherapist.</p>
+    <p class="footnote">Prototype · Saved locally in this browser · Follow your physiotherapist's advice; this website does not verify exercise technique or tell you when to push through pain.</p>
   </main>
+
+  <!-- A single shared, keyboard-accessible clock picker for all session times. -->
+  <dialog id="time-picker" class="time-picker" aria-labelledby="time-picker-title" aria-describedby="time-picker-hint">
+    <div class="time-picker-title" id="time-picker-title">Select time</div>
+    <div class="time-picker-top">
+      <div class="time-picker-readout">
+        <button type="button" id="pick-hour" class="time-part" aria-label="Choose hour">09</button>
+        <span aria-hidden="true">:</span>
+        <button type="button" id="pick-minute" class="time-part" aria-label="Choose minute">00</button>
+      </div>
+      <div class="period-buttons" role="group" aria-label="AM or PM">
+        <button type="button" data-period="am" id="pick-am">AM</button>
+        <button type="button" data-period="pm" id="pick-pm">PM</button>
+      </div>
+    </div>
+    <div class="time-picker-body">
+      <p id="time-picker-hint" class="time-picker-hint">Choose an hour, then a minute.</p>
+      <div id="clock-face" class="clock-face" aria-label="Clock face"></div>
+    </div>
+    <div class="time-picker-actions">
+      <button type="button" class="btn btn-secondary" id="cancel-clock">Cancel</button>
+      <button type="button" class="btn" id="save-clock">OK</button>
+    </div>
+  </dialog>
+
   <div id="toast" role="status" aria-live="polite" hidden></div>
-  <script src="script.js" defer></script>
+  <aside id="notification-preview" class="notification-preview" role="status" aria-live="polite" hidden>
+    <div class="preview-heading">
+      <strong id="preview-title">Physio Buddy</strong>
+      <button id="close-preview" class="close-preview" type="button" aria-label="Close notification preview">×</button>
+    </div>
+    <p id="preview-body"></p>
+    <button type="button" class="preview-link" id="preview-open">View exercises</button>
+  </aside>
 </body>
 </html>

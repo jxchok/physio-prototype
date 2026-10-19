@@ -1,98 +1,581 @@
+// APP_NAME prototype — all data is kept on this device via localStorage.
 (() => {
-      'use strict';
-      const STORAGE_KEY = 'app_name_physio_first_draft_v1';
-      const QUOTES = [
-        'Small steps still count.',
-        'Progress takes time. Be kind to yourself.',
-        'Consistency matters more than perfection.',
-        'Every effort is worth acknowledging.',
-        'It is okay to pause when you need to.'
-      ];
-      const DEFAULT = {exercises: [], log: {}, settings: {morningOn:false, morningTime:'09:00', eveningOn:false, eveningTime:'20:00', hourlyOn:false}, quoteIndex:0, lastHourly:null, lastReminder:{}};
-      function load(){try {let data=JSON.parse(localStorage.getItem(STORAGE_KEY)); return data && Array.isArray(data.exercises) && data.settings ? {...structuredClone(DEFAULT),...data,settings:{...DEFAULT.settings,...data.settings}} : structuredClone(DEFAULT);} catch {return structuredClone(DEFAULT);}}
-      let state=load(), editingId=null, toastTimer;
-      const el=id=>document.getElementById(id);
-      function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch{showToast('Could not save to browser storage.');}}
-      function pad(n){return String(n).padStart(2,'0');}
-      function dayKey(date=new Date()){return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`;}
-      function dayOffset(n){const now=new Date();return dayKey(new Date(now.getFullYear(),now.getMonth(),now.getDate()+n));}
-      function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-      function activeOn(ex,d){return ex.createdOn<=d && (!ex.archivedOn || ex.archivedOn>d);}
-      function scheduled(ex,session){return ex.schedule==='both'||ex.schedule===session;}
-      function activeExercises(d=dayKey()){return state.exercises.filter(x=>activeOn(x,d));}
-      function sessionExercises(session,d=dayKey()){return activeExercises(d).filter(x=>scheduled(x,session));}
-      function isDone(d,id,session){return Boolean(state.log[d]?.[`${id}_${session}`]);}
-      function countsFor(d){let total=0,done=0;for(const session of ['morning','evening'])for(const ex of sessionExercises(session,d)){total++;if(isDone(d,ex.id,session))done++;}return {total,done};}
-      function streak(){let start=0;const today=countsFor(dayKey());if(!(today.total>0&&today.total===today.done))start=-1;let n=0;for(let i=start;i>-365;i--){const c=countsFor(dayOffset(i));if(c.total===0||c.done!==c.total)break;n++;}return n;}
-      function showToast(msg){const target=el('toast');target.textContent=msg;target.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>target.hidden=true,5000);}
-      function renderToday(){
-        const today=new Date();el('date-display').textContent=today.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
-        let {total,done}=countsFor(dayKey());el('done-count').textContent=`${done}/${total}`;
-        const s=streak();el('streak-count').textContent=`${s} ${s===1?'day':'days'}`;
-        const percent=total?Math.round(done/total*100):0;el('progress-percent').textContent=`${percent}%`;el('progress-bar').style.width=`${percent}%`;
-        for(const session of ['morning','evening']){
-          const exercises=sessionExercises(session);const completed=exercises.filter(x=>isDone(dayKey(),x.id,session)).length;
-          el(`${session}-count`).textContent=`${completed}/${exercises.length}`;
-          el(`${session}-exercises`).innerHTML=exercises.length?exercises.map(ex=>`
-            <label class="exercise ${isDone(dayKey(),ex.id,session)?'exercise-done':''}">
-              <input type="checkbox" data-id="${esc(ex.id)}" data-session="${session}" ${isDone(dayKey(),ex.id,session)?'checked':''} />
-              <span class="exercise-body"><span class="exercise-name">${esc(ex.name)}</span>${ex.notes?`<span class="exercise-instruction">${esc(ex.notes)}</span>`:''}</span>
-            </label>`).join(''):'<div class="empty">No exercises scheduled.</div>';
+  'use strict';
+
+  // Keep the old key so existing users do not lose their first-draft exercises.
+  const STORAGE_KEY = 'app_name_physio_first_draft_v1';
+  // Supportive, locally stored messages for the header and notifications.
+  const QUOTES = [
+    'Small steps still count.',
+    'Progress takes time. Be kind to yourself.',
+    'Consistency matters more than perfection.',
+    'Every effort is worth acknowledging.',
+    'It is okay to pause when you need to.',
+    'Your pace is valid, even when it changes.',
+    'Recovery is personal, not a competition.',
+    'A gentle routine can still make a difference.',
+    'Rest is part of caring for yourself.',
+    'Celebrate showing up, not just finishing.',
+    'A missed session does not erase your efforts.',
+    'You deserve time to look after yourself.',
+    'Be patient with your body and yourself.',
+    'It is okay to ask for support.',
+    'Today may look different from yesterday, and that is okay.',
+    'Self-care does not have to be all or nothing.',
+    'You are more than an exercise streak.',
+    'Notice what went well, however small.',
+    'Taking a pause can be a thoughtful choice.',
+    'Your well-being deserves space in your schedule.',
+    'Progress can be slow and still be meaningful.',
+    'You do not have to prove your pain to anyone.',
+    'Give yourself credit for what you can do.',
+    'Your routine can flex with your day.',
+    'Take one manageable step at a time.',
+    'Your progress is more than a number.',
+    'It is fine to start small and adjust.',
+    'Offer yourself the patience you give to others.',
+    'Be proud of learning what your body needs.',
+    'Some days call for effort; others call for rest.',
+    'Small acts of care add up over time.',
+    'Your goals should support your well-being.',
+    'You can be determined and gentle with yourself.',
+    'Choose care over pressure.',
+    'It is okay to change plans when you need to.',
+    'Your journey does not have to match anyone else\'s.',
+    'A supportive routine leaves room for real life.',
+    'Asking for help is a strength, not a setback.',
+    'You deserve kindness on harder days, too.',
+    'Consistency includes knowing when to pause.',
+    'There is value in looking after yourself today.',
+    'One session does not define your progress.',
+    'You can celebrate the effort you made.',
+    'Little by little, your habits can grow.',
+    'Listen to your body as you plan your day.',
+  ];
+  // The header changes every three minutes while the page is open.
+  const HEADER_QUOTE_INTERVAL_MS = 3 * 60 * 1000;
+  const INITIAL_SESSIONS = [
+    { id: 'morning', name: 'Morning', time: '09:00', enabled: false, start: '08:45', end: '10:00', interval: 15 },
+    { id: 'evening', name: 'Evening', time: '20:00', enabled: false, start: '19:45', end: '21:00', interval: 15 }
+  ];
+  const DEFAULT = { exercises: [], log: {}, sessions: INITIAL_SESSIONS, settings: { hourlyOn: false }, quoteIndex: 0, lastHourly: null, lastSent: {}, paused: {} };
+  const $ = id => document.getElementById(id);
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const pad = n => String(n).padStart(2, '0');
+  const dateKey = (date = new Date()) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const offsetKey = n => { const d = new Date(); return dateKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)); };
+  const minutes = time => { const [h, m] = String(time).split(':').map(Number); return h * 60 + m; };
+  const clockTime = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+  const escapeHtml = text => String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+  function createWindow(time) {
+    const at = minutes(time);
+    return { start: clockTime(Math.max(0, at - 15)), end: clockTime(Math.min(1439, at + 60)) };
+  }
+
+  function load() {
+    try {
+      const data = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (!data || !Array.isArray(data.exercises)) return clone(DEFAULT);
+      const loaded = { ...clone(DEFAULT), ...data, settings: { ...DEFAULT.settings, ...(data.settings || {}) } };
+
+      // Migrate the original fixed morning/night reminder settings on first visit.
+      if (!Array.isArray(data.sessions)) {
+        loaded.sessions = clone(INITIAL_SESSIONS);
+        for (const session of loaded.sessions) {
+          const originalTime = data.settings?.[`${session.id}Time`] || session.time;
+          const window = createWindow(originalTime);
+          Object.assign(session, window, { time: originalTime, enabled: Boolean(data.settings?.[`${session.id}On`]) });
         }
       }
-      function renderManage(){const list=activeExercises();el('manage-list').innerHTML=list.length?list.map(ex=>`<div class="exercise-manage">
-        <div><div class="manage-name">${esc(ex.name)}</div><div class="manage-meta">${ex.schedule==='both'?'Morning & evening':ex.schedule==='morning'?'Morning only':'Evening only'}</div></div>
-        <div class="manage-actions"><button type="button" class="btn-quiet edit-exercise" data-id="${esc(ex.id)}">Edit</button><button type="button" class="btn-quiet btn-danger remove-exercise" data-id="${esc(ex.id)}">Remove</button></div></div>`).join(''):'<div class="empty">No exercises added yet.<br />Select “+ Add exercise” to begin.</div>';}
-      function renderSettings(){for(const session of ['morning','evening']){el(`${session}-on`).checked=state.settings[`${session}On`];el(`${session}-time`).value=state.settings[`${session}Time`];}el('hourly-on').checked=state.settings.hourlyOn;el('quote-text').textContent=QUOTES[state.quoteIndex%QUOTES.length];}
-      function render(){renderToday();renderManage();renderSettings();}
-      function closeForm(){el('exercise-form').hidden=true;editingId=null;el('exercise-form').reset();el('save-btn').textContent='Save exercise';}
-      function openForm(ex){editingId=ex?.id??null;el('exercise-form').hidden=false;el('exercise-name').value=ex?.name??'';el('exercise-notes').value=ex?.notes??'';el('exercise-schedule').value=ex?.schedule??'both';el('save-btn').textContent=editingId?'Update exercise':'Save exercise';el('exercise-name').focus();}
-      el('add-btn').addEventListener('click',()=>{if(!el('exercise-form').hidden&&!editingId){closeForm();return;}openForm(null);});
-      el('cancel-btn').addEventListener('click',closeForm);
-      el('exercise-form').addEventListener('submit',event=>{
-        event.preventDefault();const name=el('exercise-name').value.trim();if(!name)return;
-        const schedule=el('exercise-schedule').value,notes=el('exercise-notes').value.trim();
-        if(editingId){const ex=state.exercises.find(x=>x.id===editingId);if(ex){ex.name=name;ex.notes=notes;ex.schedule=schedule;}}
-        else state.exercises.push({id:'ex_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),name,schedule,notes,createdOn:dayKey(),archivedOn:null});
-        save();closeForm();render();showToast('Exercise saved.');
-      });
-      el('manage-list').addEventListener('click',event=>{
-        const edit=event.target.closest('.edit-exercise'),remove=event.target.closest('.remove-exercise');if(!edit&&!remove)return;
-        const ex=state.exercises.find(x=>x.id===(edit||remove).dataset.id);if(!ex)return;
-        if(edit)openForm(ex);else if(confirm(`Remove “${ex.name}” from your plan?`)){ex.archivedOn=dayKey();save();render();showToast('Exercise removed.');}
-      });
-      for(const session of ['morning','evening']){
-        el(`${session}-exercises`).addEventListener('change',event=>{
-          if(!event.target.matches('input[type=checkbox]'))return;
-          const id=event.target.dataset.id,key=`${id}_${session}`,date=dayKey();if(!state.log[date])state.log[date]={};
-          if(event.target.checked)state.log[date][key]=true;else delete state.log[date][key];
-          save();renderToday();
-        });
-        el(`${session}-on`).addEventListener('change',event=>{state.settings[`${session}On`]=event.target.checked;save();});
-        el(`${session}-time`).addEventListener('change',event=>{state.settings[`${session}Time`]=event.target.value;save();});
-      }
-      el('new-quote').addEventListener('click',()=>{state.quoteIndex=(state.quoteIndex+1)%QUOTES.length;save();el('quote-text').textContent=QUOTES[state.quoteIndex];});
-      el('hourly-on').addEventListener('change',event=>{state.settings.hourlyOn=event.target.checked;state.lastHourly=Date.now();save();});
-      el('notification-btn').addEventListener('click',async()=>{
-        if(!('Notification' in window)){showToast('Browser notifications are not supported here.');return;}
-        try {const permission=await Notification.requestPermission();showToast(permission==='granted'?'Browser notifications enabled. Keep this page open for reminders.':'Notification permission not granted. In-page reminders still work.');}
-        catch {showToast('Could not enable browser notifications here. In-page reminders still work.');}
-      });
-      function notify(message){showToast(message);if('Notification'in window&&Notification.permission==='granted'){try{new Notification('APP_NAME',{body:message});}catch{}}}
-      function checkReminders(){
-        const now=new Date(),time=`${pad(now.getHours())}:${pad(now.getMinutes())}`,today=dayKey(now);
-        for(const session of ['morning','evening']){
-          const key=`${today}_${session}`;
-          if(state.settings[`${session}On`]&&state.settings[`${session}Time`]===time&&state.lastReminder[session]!==key){
-            state.lastReminder[session]=key;save();
-            const pending=sessionExercises(session,today).filter(x=>!isDone(today,x.id,session));
-            if(pending.length)notify(`Your ${session} physiotherapy session is scheduled. ${pending.length} exercise${pending.length!==1?'s':''} remaining.`);
-          }
-        }
-        if(state.settings.hourlyOn&&(!state.lastHourly||Date.now()-state.lastHourly>=60*60*1000)){
-          state.lastHourly=Date.now();state.quoteIndex=(state.quoteIndex+1)%QUOTES.length;save();el('quote-text').textContent=QUOTES[state.quoteIndex];notify(QUOTES[state.quoteIndex]);
+      if (!loaded.sessions.length) loaded.sessions = clone(INITIAL_SESSIONS);
+      loaded.lastSent = data.lastSent && typeof data.lastSent === 'object' ? data.lastSent : {};
+      loaded.paused = data.paused && typeof data.paused === 'object' ? data.paused : {};
+      loaded.log = data.log && typeof data.log === 'object' ? data.log : {};
+
+      // Convert the original dropdown schedules into selectable session IDs.
+      for (const ex of loaded.exercises) {
+        if (!Array.isArray(ex.sessionIds)) {
+          ex.sessionIds = ex.schedule === 'both' ? ['morning', 'evening'] : [ex.schedule || 'morning'];
         }
       }
-      render();checkReminders();setInterval(checkReminders,15000);
-      document.addEventListener('visibilitychange',()=>{if(!document.hidden){renderToday();checkReminders();}});
-    })();
+      return loaded;
+    } catch { return clone(DEFAULT); }
+  }
+
+  let state = load();
+  let editingId = null;
+  let toastTimer;
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch { showToast('Unable to save data in this browser.'); }
+  }
+  function activeExercises(day = dateKey()) {
+    return state.exercises.filter(ex => ex.createdOn <= day && (!ex.archivedOn || ex.archivedOn > day));
+  }
+  function sessionExercises(id, day = dateKey()) {
+    return activeExercises(day).filter(ex => ex.sessionIds.includes(id));
+  }
+  function done(day, exerciseId, sessionId) {
+    return Boolean(state.log[day]?.[`${exerciseId}_${sessionId}`]);
+  }
+  function remaining(id, day = dateKey()) {
+    return sessionExercises(id, day).filter(ex => !done(day, ex.id, id));
+  }
+  function counts(day) {
+    let total = 0, completed = 0;
+    for (const s of state.sessions) {
+      for (const ex of sessionExercises(s.id, day)) {
+        total++;
+        if (done(day, ex.id, s.id)) completed++;
+      }
+    }
+    return { total, completed };
+  }
+  function streak() {
+    const today = counts(dateKey());
+    const startingOffset = today.total && today.total === today.completed ? 0 : -1;
+    let result = 0;
+    for (let i = startingOffset; i > -365; i--) {
+      const count = counts(offsetKey(i));
+      if (!count.total || count.completed !== count.total) break;
+      result++;
+    }
+    return result;
+  }
+  function showToast(message) {
+    $('toast').textContent = message;
+    $('toast').hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4500);
+  }
+
+  function renderToday() {
+    const day = dateKey();
+    $('date-display').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    const { total, completed } = counts(day);
+    $('done-count').textContent = `${completed}/${total}`;
+    const days = streak();
+    $('streak-count').textContent = `${days} ${days === 1 ? 'day' : 'days'}`;
+    const percent = total ? Math.round(100 * completed / total) : 0;
+    $('progress-percent').textContent = `${percent}%`;
+    $('progress-bar').style.width = `${percent}%`;
+
+    $('today-sessions').innerHTML = state.sessions.map(s => {
+      const exercises = sessionExercises(s.id, day);
+      const completedHere = exercises.filter(ex => done(day, ex.id, s.id)).length;
+      return `<div class="session" id="session-${escapeHtml(s.id)}">
+        <div class="session-title">${escapeHtml(s.name)} <span class="session-count">${escapeHtml(s.time)} · ${completedHere}/${exercises.length}</span></div>
+        ${exercises.length ? exercises.map(ex => `<label class="exercise ${done(day, ex.id, s.id) ? 'exercise-done' : ''}">
+          <input type="checkbox" data-exercise="${escapeHtml(ex.id)}" data-session="${escapeHtml(s.id)}" ${done(day, ex.id, s.id) ? 'checked' : ''} />
+          <span class="exercise-body"><span class="exercise-name">${escapeHtml(ex.name)}</span>${ex.notes ? `<span class="exercise-instruction">${escapeHtml(ex.notes)}</span>` : ''}</span>
+        </label>`).join('') : '<div class="empty">No exercises scheduled.</div>'}
+      </div>`;
+    }).join('');
+  }
+
+  function renderManage() {
+    const exercises = activeExercises();
+    $('manage-list').innerHTML = exercises.length ? exercises.map(ex => {
+      const assigned = state.sessions.filter(s => ex.sessionIds.includes(s.id)).map(s => s.name).join(', ');
+      return `<div class="exercise-manage"><div>
+        <div class="manage-name">${escapeHtml(ex.name)}</div>
+        <div class="manage-meta">${escapeHtml(assigned || 'No sessions')}</div>
+        </div><div class="manage-actions">
+        <button type="button" class="btn-quiet edit-exercise" data-id="${escapeHtml(ex.id)}">Edit</button>
+        <button type="button" class="btn-quiet btn-danger remove-exercise" data-id="${escapeHtml(ex.id)}">Remove</button>
+        </div></div>`;
+    }).join('') : '<div class="empty">No exercises added yet.<br>Select “+ Add exercise” to begin.</div>';
+  }
+
+  function renderExerciseOptions(checkedIds = []) {
+    $('exercise-session-options').innerHTML = state.sessions.map(s => `<label class="toggle-row">
+      <input type="checkbox" name="exercise-session" value="${escapeHtml(s.id)}" ${checkedIds.includes(s.id) ? 'checked' : ''} />
+      ${escapeHtml(s.name)} (${escapeHtml(s.time)})
+    </label>`).join('');
+  }
+
+  function renderReminders() {
+    $('reminder-sessions').innerHTML = state.sessions.map(s => {
+      const paused = Boolean(state.paused[`${dateKey()}_${s.id}`]);
+      return `<form class="reminder-session" data-session="${escapeHtml(s.id)}">
+        <div class="reminder-session-heading"><strong>${escapeHtml(s.name)}</strong>
+          <button type="button" class="btn-quiet btn-danger remove-session" data-session="${escapeHtml(s.id)}" ${state.sessions.length === 1 ? 'disabled' : ''}>Remove</button>
+        </div>
+        <div class="two-fields form-grid">
+          <label class="field">Name<input name="name" maxlength="40" required value="${escapeHtml(s.name)}" /></label>
+          <label class="field">Exercise time<input type="text" class="clock-input" inputmode="none" readonly name="time" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.time)}" /></label>
+          <label class="field">Repeat from<input type="text" class="clock-input" inputmode="none" readonly name="start" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.start)}" /></label>
+          <label class="field">Until<input type="text" class="clock-input" inputmode="none" readonly name="end" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.end)}" /></label>
+          <label class="field">Repeat every<select name="interval">
+            ${[5, 10, 15, 30, 60].map(n => `<option value="${n}" ${Number(s.interval) === n ? 'selected' : ''}>${n} minutes</option>`).join('')}
+          </select></label>
+        </div>
+        <label class="toggle-row"><input type="checkbox" name="enabled" ${s.enabled ? 'checked' : ''} /> Enable reminders</label>
+        <div class="form-actions reminder-actions">
+          <button type="submit" class="btn btn-secondary">Save settings</button>
+          <button type="button" class="btn-quiet toggle-pause" data-session="${escapeHtml(s.id)}">${paused ? 'Resume reminders today' : 'Pause reminders today'}</button>
+        </div>
+        ${paused ? '<p class="muted paused-note">Reminders are paused until tomorrow.</p>' : ''}
+      </form>`;
+    }).join('');
+  }
+
+  function renderSettings() {
+    $('hourly-on').checked = Boolean(state.settings.hourlyOn);
+    $('quote-text').textContent = QUOTES[(state.quoteIndex || 0) % QUOTES.length];
+    renderReminders();
+  }
+  function render() { renderToday(); renderManage(); renderSettings(); }
+
+  function closeExerciseForm() {
+    $('exercise-form').hidden = true;
+    editingId = null;
+    $('exercise-form').reset();
+    $('save-btn').textContent = 'Save exercise';
+  }
+  function openExerciseForm(ex = null) {
+    editingId = ex?.id ?? null;
+    $('exercise-form').hidden = false;
+    $('exercise-name').value = ex?.name ?? '';
+    $('exercise-notes').value = ex?.notes ?? '';
+    renderExerciseOptions(ex ? ex.sessionIds : state.sessions.map(s => s.id));
+    $('save-btn').textContent = ex ? 'Update exercise' : 'Save exercise';
+    $('exercise-name').focus();
+  }
+  $('add-btn').addEventListener('click', () => {
+    if (!$('exercise-form').hidden && !editingId) closeExerciseForm();
+    else openExerciseForm();
+  });
+  $('cancel-btn').addEventListener('click', closeExerciseForm);
+  $('exercise-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const name = $('exercise-name').value.trim();
+    const sessionIds = [...document.querySelectorAll('input[name="exercise-session"]:checked')].map(input => input.value);
+    if (!name || !sessionIds.length) { showToast('Choose at least one session.'); return; }
+    const notes = $('exercise-notes').value.trim();
+    if (editingId) {
+      const ex = state.exercises.find(x => x.id === editingId);
+      if (ex) Object.assign(ex, { name, notes, sessionIds });
+    } else {
+      state.exercises.push({ id: `ex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, name, notes, sessionIds, createdOn: dateKey(), archivedOn: null });
+    }
+    save(); closeExerciseForm(); render(); showToast('Exercise saved.');
+  });
+  $('manage-list').addEventListener('click', event => {
+    const edit = event.target.closest('.edit-exercise');
+    const remove = event.target.closest('.remove-exercise');
+    if (!edit && !remove) return;
+    const ex = state.exercises.find(x => x.id === (edit || remove).dataset.id);
+    if (!ex) return;
+    if (edit) openExerciseForm(ex);
+    else if (confirm(`Remove “${ex.name}” from your plan?`)) {
+      ex.archivedOn = dateKey();
+      save(); render(); showToast('Exercise removed.');
+    }
+  });
+  $('today-sessions').addEventListener('change', event => {
+    const input = event.target;
+    if (!input.matches('input[type="checkbox"]')) return;
+    const day = dateKey();
+    const key = `${input.dataset.exercise}_${input.dataset.session}`;
+    if (!state.log[day]) state.log[day] = {};
+    if (input.checked) state.log[day][key] = true;
+    else delete state.log[day][key];
+    save(); renderToday();
+    if (input.checked && remaining(input.dataset.session).length === 0) {
+      const session = state.sessions.find(s => s.id === input.dataset.session);
+      showToast(`${session?.name || 'Session'} complete! No more reminders for this session today.`);
+    }
+  });
+
+  // Consistent clock-style time picker (no browser-native time input or external library).
+  // Values remain HH:mm so existing reminders and locally saved settings are unchanged.
+  const clockDialog = $('time-picker');
+  const clockFace = $('clock-face');
+  let chosenTime = null;
+
+  function timeToParts(value) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(String(value));
+    const h = match ? Math.min(23, Number(match[1])) : 9;
+    const m = match ? Math.min(59, Number(match[2])) : 0;
+    return { hour: h % 12 || 12, minute: m, period: h < 12 ? 'am' : 'pm' };
+  }
+  function to24HourTime(t) {
+    const h = (t.hour % 12) + (t.period === 'pm' ? 12 : 0);
+    return `${pad(h)}:${pad(t.minute)}`;
+  }
+  function renderClock() {
+    if (!chosenTime) return;
+    $('pick-hour').textContent = pad(chosenTime.hour);
+    $('pick-minute').textContent = pad(chosenTime.minute);
+    $('pick-hour').classList.toggle('active', chosenTime.view === 'hour');
+    $('pick-minute').classList.toggle('active', chosenTime.view === 'minute');
+    $('pick-hour').setAttribute('aria-pressed', String(chosenTime.view === 'hour'));
+    $('pick-minute').setAttribute('aria-pressed', String(chosenTime.view === 'minute'));
+    for (const [period, id] of [['am', 'pick-am'], ['pm', 'pick-pm']]) {
+      $(id).classList.toggle('active', chosenTime.period === period);
+      $(id).setAttribute('aria-pressed', String(chosenTime.period === period));
+    }
+    const choosingHours = chosenTime.view === 'hour';
+    $('time-picker-hint').textContent = choosingHours ? 'Choose an hour' : 'Choose a minute (tap between labels for exact minutes)';
+    const indicator = choosingHours ? chosenTime.hour % 12 : chosenTime.minute;
+    const angle = indicator * Math.PI / (choosingHours ? 6 : 30);
+    const handX = 140 + 102 * Math.sin(angle), handY = 140 - 102 * Math.cos(angle);
+    const nodes = Array.from({ length: 12 }, (_, index) => {
+      const value = choosingHours ? (index || 12) : index * 5;
+      const theta = index * Math.PI / 6;
+      const x = 140 + 102 * Math.sin(theta), y = 140 - 102 * Math.cos(theta);
+      const selected = choosingHours ? chosenTime.hour === value : chosenTime.minute === value;
+      return `<button type="button" class="clock-number${selected ? ' selected' : ''}" data-clock-value="${value}" aria-label="${choosingHours ? 'Hour' : 'Minute'} ${value}" aria-pressed="${selected}" style="left:${x / 2.8}%;top:${y / 2.8}%">${choosingHours ? value : pad(value)}</button>`;
+    }).join('');
+    clockFace.innerHTML = `<svg class="clock-hand" viewBox="0 0 280 280" aria-hidden="true"><line x1="140" y1="140" x2="${handX}" y2="${handY}"/><circle cx="140" cy="140" r="4"/><circle cx="${handX}" cy="${handY}" r="4"/></svg>${nodes}`;
+    clockFace.setAttribute('aria-label', choosingHours ? 'Select hour from clock face' : 'Select minute from clock face');
+  }
+  function chooseDialValue(value) {
+    if (!chosenTime) return;
+    if (chosenTime.view === 'hour') {
+      chosenTime.hour = value || 12;
+      chosenTime.view = 'minute';
+    } else chosenTime.minute = value;
+    renderClock();
+  }
+  function openClock(input) {
+    const parts = timeToParts(input.value);
+    chosenTime = { ...parts, view: 'hour', target: input };
+    renderClock();
+    clockDialog.showModal();
+    $('pick-hour').focus();
+  }
+  // Event delegation also covers the session forms inserted dynamically later.
+  document.addEventListener('click', event => {
+    const input = event.target.closest('input.clock-input');
+    if (input) openClock(input);
+  });
+  document.addEventListener('keydown', event => {
+    if (event.target.matches('input.clock-input') && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      openClock(event.target);
+    }
+  });
+  $('pick-hour').addEventListener('click', () => { chosenTime.view = 'hour'; renderClock(); });
+  $('pick-minute').addEventListener('click', () => { chosenTime.view = 'minute'; renderClock(); });
+  for (const period of ['am', 'pm']) {
+    $(`pick-${period}`).addEventListener('click', () => { chosenTime.period = period; renderClock(); });
+  }
+  clockFace.addEventListener('click', event => {
+    const button = event.target.closest('.clock-number');
+    if (button) chooseDialValue(Number(button.dataset.clockValue));
+  });
+  // The ring accepts arbitrary minutes, e.g. 08:47, rather than only multiples of 5.
+  clockFace.addEventListener('pointerdown', event => {
+    if (!chosenTime || event.target.closest('.clock-number')) return;
+    const rect = clockFace.getBoundingClientRect();
+    const dx = event.clientX - (rect.left + rect.width / 2);
+    const dy = event.clientY - (rect.top + rect.height / 2);
+    const radius = Math.hypot(dx, dy);
+    if (radius < rect.width * 0.17 || radius > rect.width * 0.5) return;
+    const around = (Math.atan2(dx, -dy) + 2 * Math.PI) % (2 * Math.PI);
+    const steps = chosenTime.view === 'hour' ? 12 : 60;
+    let value = Math.round(around / (2 * Math.PI) * steps) % steps;
+    if (chosenTime.view === 'hour' && value === 0) value = 12;
+    chooseDialValue(value);
+  });
+  $('cancel-clock').addEventListener('click', () => clockDialog.close());
+  $('save-clock').addEventListener('click', () => {
+    if (!chosenTime?.target) return;
+    chosenTime.target.value = to24HourTime(chosenTime);
+    chosenTime.target.dispatchEvent(new Event('change', { bubbles: true }));
+    clockDialog.close();
+  });
+  // Clicking the backdrop or pressing Escape cancels without changing the value.
+  clockDialog.addEventListener('click', event => {
+    if (event.target === clockDialog) clockDialog.close();
+  });
+  clockDialog.addEventListener('close', () => {
+    const focusTarget = chosenTime?.target;
+    chosenTime = null;
+    if (focusTarget?.isConnected) focusTarget.focus();
+  });
+
+  // Each session can have its own time, repeat window, and reminder interval.
+  $('add-session-btn').addEventListener('click', () => { $('add-session-form').hidden = !$('add-session-form').hidden; });
+  $('cancel-session-btn').addEventListener('click', () => { $('add-session-form').hidden = true; });
+  $('add-session-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const name = $('new-session-name').value.trim();
+    const time = $('new-session-time').value;
+    if (!name || !time) return;
+    const window = createWindow(time);
+    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    state.sessions.push({ id, name, time, enabled: false, ...window, interval: 15 });
+    state.sessions.sort((a, b) => a.time.localeCompare(b.time));
+    save();
+    $('add-session-form').hidden = true;
+    $('new-session-name').value = '';
+    render();
+    if (!$('exercise-form').hidden) closeExerciseForm();
+    showToast('Session added. Assign exercises to it using Edit.');
+  });
+  $('reminder-sessions').addEventListener('submit', event => {
+    const form = event.target.closest('.reminder-session');
+    if (!form) return;
+    event.preventDefault();
+    const session = state.sessions.find(s => s.id === form.dataset.session);
+    if (!session) return;
+    const fields = new FormData(form);
+    const name = String(fields.get('name') || '').trim();
+    const time = String(fields.get('time') || '');
+    const start = String(fields.get('start') || '');
+    const end = String(fields.get('end') || '');
+    if (!name || !time || !start || !end || minutes(end) <= minutes(start)) {
+      showToast('Choose a reminder end time later than its start time (same day).');
+      return;
+    }
+    Object.assign(session, { name, time, start, end, interval: Number(fields.get('interval')), enabled: fields.has('enabled') });
+    state.sessions.sort((a, b) => a.time.localeCompare(b.time));
+    // Allow the current time slot to be checked again after an edit; never carry a stale slot.
+    delete state.lastSent[`${dateKey()}_${session.id}`];
+    save(); render();
+    if (!$('exercise-form').hidden) closeExerciseForm();
+    showToast('Reminder settings saved.');
+  });
+  $('reminder-sessions').addEventListener('click', event => {
+    const remove = event.target.closest('.remove-session');
+    const pause = event.target.closest('.toggle-pause');
+    if (remove) {
+      if (state.sessions.length <= 1) return;
+      const session = state.sessions.find(s => s.id === remove.dataset.session);
+      if (!session || !confirm(`Remove the ${session.name} session? Exercises will remain in other sessions.`)) return;
+      state.sessions = state.sessions.filter(s => s.id !== session.id);
+      for (const ex of state.exercises) ex.sessionIds = ex.sessionIds.filter(id => id !== session.id);
+      save(); render();
+      if (!$('exercise-form').hidden) closeExerciseForm();
+      showToast('Session removed.');
+    }
+    if (pause) {
+      const key = `${dateKey()}_${pause.dataset.session}`;
+      if (state.paused[key]) delete state.paused[key];
+      else state.paused[key] = true;
+      save(); renderReminders();
+      showToast(state.paused[key] ? 'Reminders paused for today.' : 'Reminders resumed.');
+    }
+  });
+
+  $('hourly-on').addEventListener('change', event => {
+    state.settings.hourlyOn = event.target.checked;
+    state.lastHourly = Date.now();
+    save();
+  });
+
+  // The on-page pop-up works even if notifications are blocked.
+  function previewNotification(title, body) {
+    $('preview-title').textContent = title;
+    $('preview-body').textContent = body;
+    $('notification-preview').hidden = false;
+  }
+  $('close-preview').addEventListener('click', () => { $('notification-preview').hidden = true; });
+  $('preview-open').addEventListener('click', () => {
+    $('notification-preview').hidden = true;
+    $('today-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  async function askForNotificationPermission() {
+    if (!('Notification' in window) || !window.isSecureContext) {
+      $('notification-status').textContent = 'System notifications require a supported browser and HTTPS (GitHub Pages is HTTPS). The in-page preview always works.';
+      return false;
+    }
+    try {
+      const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+      $('notification-status').textContent = permission === 'granted'
+        ? 'Notifications enabled. Timed reminders run while this website is open.'
+        : 'System notifications are not enabled. The in-page notification preview still works.';
+      return permission === 'granted';
+    } catch {
+      $('notification-status').textContent = 'Browser notifications are unavailable here. The in-page preview still works.';
+      return false;
+    }
+  }
+  function sendSystemNotification(title, body) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try { new Notification(title, { body }); } catch { /* Some mobile browsers don't support this constructor. */ }
+    }
+  }
+  function randomQuoteIndex(exclude = -1) {
+    // Pick randomly, but avoid showing the same header message twice in a row.
+    const previous = Number(exclude);
+    const validPrevious = Number.isInteger(previous) && previous >= 0 && previous < QUOTES.length;
+    if (!validPrevious || QUOTES.length < 2) return Math.floor(Math.random() * QUOTES.length);
+    const choice = Math.floor(Math.random() * (QUOTES.length - 1));
+    return choice >= previous ? choice + 1 : choice;
+  }
+  function rotateHeaderQuote() {
+    state.quoteIndex = randomQuoteIndex(state.quoteIndex);
+    $('quote-text').textContent = QUOTES[state.quoteIndex];
+    save();
+  }
+  function nextQuote() {
+    // Reminder messages can vary without changing the header between rotations.
+    return QUOTES[randomQuoteIndex(state.quoteIndex)];
+  }
+  function sendReminder(session, pendingCount, isDemo = false) {
+    const title = `APP_NAME · ${session.name} reminder${isDemo ? ' (demo)' : ''}`;
+    const body = pendingCount
+      ? `${pendingCount} exercise${pendingCount === 1 ? '' : 's'} left in this session. ${nextQuote()}`
+      : `A sample reminder for your ${session.name.toLowerCase()} session. ${nextQuote()}`;
+    previewNotification(title, body);
+    sendSystemNotification(title, body);
+  }
+  $('notification-btn').addEventListener('click', async () => {
+    const allowed = await askForNotificationPermission();
+    showToast(allowed ? 'Browser notifications enabled.' : 'You can still use the on-page notification preview.');
+  });
+  $('test-notification-btn').addEventListener('click', async () => {
+    const session = state.sessions[0];
+    const pendingCount = session ? remaining(session.id).length : 0;
+    // Show preview immediately; no scheduled time or exercise is required for a demo.
+    sendReminder(session || { name: 'Physiotherapy' }, pendingCount, true);
+    save();
+    if ('Notification' in window && Notification.permission === 'default') {
+      const allowed = await askForNotificationPermission();
+      if (allowed) sendSystemNotification(`APP_NAME · ${session?.name || 'Physiotherapy'} reminder (demo)`, $('preview-body').textContent);
+    }
+  });
+
+  function checkReminders() {
+    const now = new Date(), day = dateKey(now);
+    const at = now.getHours() * 60 + now.getMinutes();
+    let changed = false;
+    for (const s of state.sessions) {
+      if (!s.enabled || state.paused[`${day}_${s.id}`] || !remaining(s.id, day).length) continue;
+      const from = minutes(s.start), until = minutes(s.end);
+      const gap = Number(s.interval);
+      if (!gap || at < from || at > until) continue;
+      // Every X minutes starting at 'Repeat from' — up to and including 'Until'.
+      // If the tab was sleeping, only the latest due reminder is sent on return.
+      const slot = Math.floor((at - from) / gap);
+      const key = `${day}_${s.id}`;
+      if (state.lastSent[key] === slot) continue;
+      state.lastSent[key] = slot;
+      sendReminder(s, remaining(s.id, day).length);
+      changed = true;
+    }
+    if (state.settings.hourlyOn && (!state.lastHourly || Date.now() - state.lastHourly >= 60 * 60 * 1000)) {
+      state.lastHourly = Date.now();
+      const body = nextQuote();
+      previewNotification('APP_NAME · A little motivation', body);
+      sendSystemNotification('APP_NAME · A little motivation', body);
+      changed = true;
+    }
+    if (changed) save();
+  }
+
+  render();
+  rotateHeaderQuote(); // New quote on each visit, including a refresh.
+  setInterval(rotateHeaderQuote, HEADER_QUOTE_INTERVAL_MS);
+  checkReminders();
+  setInterval(checkReminders, 15000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { renderToday(); checkReminders(); }
+  });
+})();
