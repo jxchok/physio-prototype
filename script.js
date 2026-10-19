@@ -58,7 +58,7 @@
     { id: 'morning', name: 'Morning', time: '09:00', enabled: false, start: '08:45', end: '10:00', interval: 15 },
     { id: 'evening', name: 'Evening', time: '20:00', enabled: false, start: '19:45', end: '21:00', interval: 15 }
   ];
-  const DEFAULT = { exercises: [], log: {}, ratings: {}, contacts: [], sessions: INITIAL_SESSIONS, settings: { hourlyOn: false, finalOn: false, finalTime: '22:30' }, quoteIndex: 0, lastHourly: null, lastSent: {}, finalSent: '', paused: {}, snoozedUntil: {}, reasons: {} };
+  const DEFAULT = { exercises: [], log: {}, ratings: {}, contacts: [], friendMessages: {}, sessions: INITIAL_SESSIONS, scheduleOverrides: {}, settings: { hourlyOn: false, finalOn: false, finalTime: '22:30' }, quoteIndex: 0, lastHourly: null, lastSent: {}, finalSent: '', paused: {}, snoozedUntil: {}, reasons: {} };
   const $ = id => document.getElementById(id);
   const clone = value => JSON.parse(JSON.stringify(value));
   const pad = n => String(n).padStart(2, '0');
@@ -94,8 +94,10 @@
       loaded.log = data.log && typeof data.log === 'object' ? data.log : {};
       loaded.ratings = data.ratings && typeof data.ratings === 'object' ? data.ratings : {};
       loaded.contacts = Array.isArray(data.contacts) ? data.contacts.filter(c => c && typeof c.id === 'string' && typeof c.name === 'string') : [];
+      loaded.friendMessages = data.friendMessages && typeof data.friendMessages === 'object' && !Array.isArray(data.friendMessages) ? data.friendMessages : {};
       loaded.reasons = data.reasons && typeof data.reasons === 'object' ? data.reasons : {};
       loaded.snoozedUntil = data.snoozedUntil && typeof data.snoozedUntil === 'object' ? data.snoozedUntil : {};
+      loaded.scheduleOverrides = data.scheduleOverrides && typeof data.scheduleOverrides === 'object' && !Array.isArray(data.scheduleOverrides) ? data.scheduleOverrides : {};
       loaded.finalSent = typeof data.finalSent === 'string' ? data.finalSent : '';
 
       // Convert the original dropdown schedules into selectable session IDs.
@@ -112,10 +114,14 @@
   let editingId = null;
   let editingContactId = null;
   let toastTimer;
+  let cheerTimer;
+  let activeFriendId = null;
   let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   let calendarSelected = dateKey();
   let ratingTarget = null;
+  let ratingNewCompletion = false;
   let buddySessionId = null;
+  let editingOccurrence = null;
   let previewSessionId = null;
   const validVideoId = id => /^[a-zA-Z0-9_-]{11}$/.test(id);
   function youtubeVideoId(url) {
@@ -136,6 +142,66 @@
   function logKey(ex, session) { return `${ex}_${session}`; }
   function sessionIsPaused(id, day = dateKey()) { return Boolean(state.paused[`${day}_${id}`]); }
 
+  // Install the sample items for new visitors, or migrate V12 sample items.
+  // Existing users keep their own exercises, contacts, and reminder times.
+  function seedV13DemoItems() {
+    if (state.demoSeededV13) return;
+    const sampleContactId = 'demo_contact_mother';
+    const formerDemoSessionId = 'demo_session_afternoon';
+    const sampleExerciseId = 'demo_exercise_seated_rotations';
+
+    // Seed the examples once for users who never received the V12 sample.
+    if (!state.demoSeededV12) {
+      if (!state.contacts.some(c => c.id === sampleContactId ||
+          (c.name.trim().toLowerCase() === 'mother' && c.phone === '12345678'))) {
+        state.contacts.push({
+          id: sampleContactId, name: 'Mother', phone: '12345678', email: '', isDemo: true
+        });
+      }
+      if (!state.exercises.some(ex => ex.id === sampleExerciseId)) {
+        state.exercises.push({
+          id: sampleExerciseId,
+          name: 'Seated Rotations (Demo)',
+          notes: 'Demonstration only. Not a personalised exercise recommendation; follow your physiotherapist\'s instructions.',
+          // YouTube demonstration linked by an NHS hospital.
+          video: 'https://www.youtube.com/watch?v=Lm7GDqIGa-I',
+          sessionIds: ['morning'],
+          createdOn: dateKey(), archivedOn: null
+        });
+      }
+      state.demoSeededV12 = true;
+    }
+
+    // Migrate any V12 exercise (including user-assigned exercises) that used
+    // the old standalone demo session into the existing Morning session.
+    for (const ex of state.exercises) {
+      if (!Array.isArray(ex.sessionIds) || !ex.sessionIds.includes(formerDemoSessionId)) continue;
+      ex.sessionIds = [...new Set(ex.sessionIds.map(id =>
+        id === formerDemoSessionId ? 'morning' : id))];
+    }
+
+    // Preserve completed-exercise history and optional scores from the old
+    // sample session, without overwriting any Morning entries already saved.
+    for (const dailyLog of [state.log, state.ratings]) {
+      for (const entries of Object.values(dailyLog)) {
+        if (!entries || typeof entries !== 'object') continue;
+        for (const oldKey of Object.keys(entries)) {
+          const suffix = `_${formerDemoSessionId}`;
+          if (!oldKey.endsWith(suffix)) continue;
+          const newKey = `${oldKey.slice(0, -suffix.length)}_morning`;
+          if (!Object.hasOwn(entries, newKey)) entries[newKey] = entries[oldKey];
+          delete entries[oldKey];
+        }
+      }
+    }
+
+    // The extra demo session is no longer needed; Morning keeps its own
+    // timing and reminder settings, unchanged.
+    state.sessions = state.sessions.filter(s => s.id !== formerDemoSessionId);
+    state.demoSeededV13 = true;
+    save();
+  }
+
   function save() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch { showToast('Unable to save data in this browser.'); }
@@ -143,7 +209,40 @@
   function activeExercises(day = dateKey()) {
     return state.exercises.filter(ex => ex.createdOn <= day && (!ex.archivedOn || ex.archivedOn > day));
   }
+  // Recurrences use local calendar dates, not a fixed number of milliseconds,
+  // so weekdays and month-end rules remain stable across clock changes.
+  const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const weekdayOf = day => (new Date(`${day}T12:00:00`).getDay() + 6) % 7;
+  const scheduleOverrideKey = (day, id) => `${day}_${id}`;
+  const getScheduleOverride = (id, day) => state.scheduleOverrides[scheduleOverrideKey(day, id)] || {};
+  function isRecurringOccurrence(s, day) {
+    const start = s.startDate || '2000-01-01'; // Legacy daily sessions keep their old dates.
+    if (day < start) return Boolean(s.pastDailyBefore); // Preserve old progress before the series was edited.
+    const repeat = s.repeat || 'daily';
+    if (repeat === 'once') return day === start;
+    if (repeat === 'daily') return true;
+    const weekday = weekdayOf(day);
+    if (repeat === 'weekly') return weekday === weekdayOf(start);
+    if (repeat === 'custom') return Array.isArray(s.weekdays) && s.weekdays.includes(weekday);
+    if (repeat === 'monthly') return Number(day.slice(8)) === Number(start.slice(8));
+    if (repeat === 'yearly') return day.slice(5) === start.slice(5);
+    return true;
+  }
+  function sessionOccurs(s, day = dateKey()) {
+    if (!s || !isRecurringOccurrence(s, day)) return false;
+    return !getScheduleOverride(s.id, day).skipped;
+  }
+  function sessionTimeFor(s, day = dateKey()) {
+    return getScheduleOverride(s.id, day).time || s.time;
+  }
+  function occurrenceWindow(s, day = dateKey()) {
+    const delta = minutes(sessionTimeFor(s, day)) - minutes(s.time);
+    return { start: clockTime(Math.max(0, Math.min(1439, minutes(s.start) + delta))),
+             end: clockTime(Math.max(0, Math.min(1439, minutes(s.end) + delta))) };
+  }
   function sessionExercises(id, day = dateKey()) {
+    const s = state.sessions.find(s => s.id === id);
+    if (!sessionOccurs(s, day)) return [];
     return activeExercises(day).filter(ex => ex.sessionIds.includes(id));
   }
   function done(day, exerciseId, sessionId) {
@@ -180,6 +279,25 @@
     toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4500);
   }
 
+  // Celebrate the act of logging an exercise without suggesting anyone should push through pain.
+  const COMPLETION_MESSAGES = [
+    'Good job! You made time for your prescribed exercise.',
+    'Nice work! Every effort deserves recognition.',
+    'Well done! Take a moment to appreciate your effort.',
+    'You did it! Remember to be kind to yourself along the way.',
+    'Great job logging your exercise today!'
+  ];
+  let cheerIndex = 0;
+  function showCompletionCheer(sessionFinished = false) {
+    const panel = $('completion-cheer');
+    panel.textContent = sessionFinished
+      ? '🌟 Great work! You completed this session. Take care of yourself and rest as advised.'
+      : `🌟 ${COMPLETION_MESSAGES[cheerIndex++ % COMPLETION_MESSAGES.length]}`;
+    panel.hidden = false;
+    clearTimeout(cheerTimer);
+    cheerTimer = setTimeout(() => { panel.hidden = true; }, 7500);
+  }
+
   function renderToday() {
     const day = dateKey();
     $('date-display').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
@@ -193,11 +311,11 @@
     const hasHighPain = Object.values(state.ratings[day] || {}).some(r => r && Number(r.pain) >= 8);
     $('high-pain-support').hidden = !hasHighPain;
 
-    $('today-sessions').innerHTML = state.sessions.map(session => {
+    $('today-sessions').innerHTML = state.sessions.filter(session => sessionOccurs(session, day)).sort((a,b) => sessionTimeFor(a,day).localeCompare(sessionTimeFor(b,day))).map(session => {
       const exercises = sessionExercises(session.id, day);
       const completedHere = exercises.filter(ex => done(day, ex.id, session.id)).length;
       return `<div class="session" id="session-${escapeHtml(session.id)}">
-        <div class="session-title">${escapeHtml(session.name)} <span class="session-count">${escapeHtml(session.time)} · ${completedHere}/${exercises.length}</span></div>
+        <div class="session-title">${escapeHtml(session.name)} <span class="session-count">${escapeHtml(sessionTimeFor(session, day))} · ${completedHere}/${exercises.length}</span></div>
         ${exercises.length ? exercises.map(ex => {
           const complete = done(day, ex.id, session.id);
           const rating = state.ratings[day]?.[logKey(ex.id, session.id)];
@@ -208,7 +326,7 @@
             <label class="exercise-main"><input type="checkbox" data-exercise="${escapeHtml(ex.id)}" data-session="${escapeHtml(session.id)}" ${complete ? 'checked' : ''} />
               <span class="exercise-body"><span class="exercise-name">${escapeHtml(ex.name)}</span>${ex.notes ? `<span class="exercise-instruction">${escapeHtml(ex.notes)}</span>` : ''}${ratingInfo}</span>
             </label>
-            <div class="exercise-extras">${video ? `<button type="button" class="btn-quiet watch-video" data-video="${video}" data-name="${escapeHtml(ex.name)}">▶ Demo</button>` : ''}${complete ? `<button type="button" class="btn-quiet edit-rating" data-exercise="${escapeHtml(ex.id)}" data-session="${escapeHtml(session.id)}">${ratingInfo ? 'Edit score' : 'Rate'}</button>` : ''}</div>
+            <div class="exercise-extras">${video ? `<button type="button" class="btn-quiet watch-video" data-video="${video}" data-name="${escapeHtml(ex.name)}">▶ Video</button>` : ''}${complete ? `<button type="button" class="btn-quiet edit-rating" data-exercise="${escapeHtml(ex.id)}" data-session="${escapeHtml(session.id)}">${ratingInfo ? 'Edit score' : 'Rate'}</button>` : ''}</div>
           </div>`;
         }).join('') : '<div class="empty">No exercises scheduled.</div>'}
       </div>`;
@@ -233,15 +351,68 @@
       const kind = future || !tally.total ? 'empty' : anyPaused ? 'paused'
         : tally.completed === tally.total ? 'completed'
         : tally.completed ? 'partial' : key < dateKey() ? 'missed' : 'empty';
-      html += `<button type="button" class="calendar-day ${kind} ${key === dateKey() ? 'is-today' : ''} ${key === calendarSelected ? 'selected' : ''}" data-day="${key}" aria-label="${escapeHtml(key)}: ${tally.completed} of ${tally.total} exercises completed" aria-pressed="${key === calendarSelected}">${day}</button>`;
+      const daySessions = state.sessions.filter(s => sessionOccurs(s,key)).sort((a,b)=>sessionTimeFor(a,key).localeCompare(sessionTimeFor(b,key)));
+      const eventList = daySessions.slice(0,2).map(s => `<span class="calendar-event">${escapeHtml(sessionTimeFor(s,key))} ${escapeHtml(s.name)}</span>`).join('');
+      html += `<button type="button" class="calendar-day ${kind} ${key === dateKey() ? 'is-today' : ''} ${key === calendarSelected ? 'selected' : ''}" data-day="${key}" aria-label="${escapeHtml(key)}: ${daySessions.length} scheduled sessions, ${tally.completed} of ${tally.total} exercises completed" aria-pressed="${key === calendarSelected}"><span class="calendar-number">${day}</span><span class="calendar-events">${eventList}${daySessions.length>2?`<span class="calendar-event-more">+${daySessions.length-2} more</span>`:''}</span></button>`;
     }
     $('calendar-grid').innerHTML = html;
     const {total,completed} = counts(calendarSelected);
     const selectedLabel = new Date(`${calendarSelected}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
     const pausedCount = state.sessions.filter(s => sessionIsPaused(s.id, calendarSelected) && sessionExercises(s.id,calendarSelected).length).length;
     $('calendar-detail').textContent = `${selectedLabel}: ${total ? `${completed} of ${total} exercises logged` : 'No exercises scheduled'}${pausedCount ? ` · ${pausedCount} session${pausedCount===1?'':'s'} paused` : ''}.`;
-    $('next-month').disabled = year === new Date().getFullYear() && month === new Date().getMonth();
+    $('next-month').disabled = false;
+    renderDayPlan();
   }
+
+
+  function friendlyDate(day) { return new Date(`${day}T12:00:00`).toLocaleDateString(undefined,{ weekday:'short', month:'short', day:'numeric', year:'numeric' }); }
+  function repeatDescription(s) {
+    const kind = s.repeat || 'daily';
+    if (kind === 'once') return 'One-time';
+    if (kind === 'daily') return 'Every day';
+    if (kind === 'weekly') return 'Every week';
+    if (kind === 'monthly') return 'Every month';
+    if (kind === 'yearly') return 'Every year';
+    return `Weekly · ${(s.weekdays || []).map(i=>WEEKDAYS[i]).join(', ')}`;
+  }
+  function renderDayPlan() {
+    $('day-plan-date').textContent = friendlyDate(calendarSelected);
+    const sessions = state.sessions.filter(s => isRecurringOccurrence(s,calendarSelected)).sort((a,b)=>sessionTimeFor(a,calendarSelected).localeCompare(sessionTimeFor(b,calendarSelected)));
+    $('day-plan-list').innerHTML = sessions.length ? sessions.map(s=>{
+      const override = getScheduleOverride(s.id,calendarSelected);
+      const skipped = Boolean(override.skipped);
+      const total = skipped ? 0 : sessionExercises(s.id,calendarSelected).length;
+      const completed = skipped ? 0 : total - remaining(s.id,calendarSelected).length;
+      return `<div class="day-plan-item ${skipped?'skipped':''}"><div class="day-plan-info"><strong>${escapeHtml(s.name)}</strong><span>${escapeHtml(sessionTimeFor(s,calendarSelected))} · ${escapeHtml(repeatDescription(s))}${skipped?' · Skipped':` · ${completed}/${total} logged`}${override.time && !skipped?' · Changed for this date':''}</span></div><div class="day-plan-actions">${skipped?`<button type="button" class="btn btn-secondary restore-occurrence" data-id="${escapeHtml(s.id)}">Restore</button>`:`<button type="button" class="btn btn-secondary edit-occurrence" data-id="${escapeHtml(s.id)}">Edit this day</button>`}</div></div>`;
+    }).join('') : '<div class="day-plan-empty">No sessions scheduled. Add one to this date.</div>';
+  }
+  function populateWeekdayPicker(containerId, values=[0,1,2,3,4]) {
+    const picker=$(containerId).querySelector('.weekday-choices');
+    picker.innerHTML=WEEKDAYS.map((d,i)=>`<label><input type="checkbox" value="${i}" ${values.includes(i)?'checked':''}/><span>${d}</span></label>`).join('');
+  }
+  function selectedWeekdays(container) { return [...container.querySelectorAll('input[type=checkbox]:checked')].map(i=>Number(i.value)); }
+  function showWeekdays(repeatInput, weekdaysEl) {
+    weekdaysEl.hidden=repeatInput.value!=='custom';
+  }
+  function openAddSession(date = dateKey()) {
+    $('add-session-form').hidden=false;
+    $('new-session-date').value=date;
+    $('new-session-repeat').value='daily';
+    $('new-session-weekdays').hidden=true;
+    const options=activeExercises(date);
+    $('new-session-exercises').innerHTML=options.length?options.map(ex=>`<label class="toggle-row"><input type="checkbox" name="new-session-exercise" value="${escapeHtml(ex.id)}" checked/> ${escapeHtml(ex.name)}</label>`).join(''):'<p class="muted">Add exercises under My exercises to assign them here.</p>';
+    $('add-session-form').scrollIntoView({behavior:'smooth',block:'center'});
+    $('new-session-name').focus({preventScroll:true});
+  }
+  function openOccurrence(id, day) {
+    const s=state.sessions.find(s=>s.id===id);
+    if (!s || !sessionOccurs(s,day)) return;
+    editingOccurrence={id,day};
+    $('occurrence-subtitle').textContent=`${s.name} · ${friendlyDate(day)}`;
+    $('occurrence-time').value=sessionTimeFor(s,day);
+    $('occurrence-dialog').showModal();
+  }
+  function refreshScheduleView() { save(); renderToday(); renderCalendar(); renderReminders(); }
 
   function renderManage() {
     const exercises = activeExercises();
@@ -260,7 +431,7 @@
   function renderExerciseOptions(checkedIds = []) {
     $('exercise-session-options').innerHTML = state.sessions.map(s => `<label class="toggle-row">
       <input type="checkbox" name="exercise-session" value="${escapeHtml(s.id)}" ${checkedIds.includes(s.id) ? 'checked' : ''} />
-      ${escapeHtml(s.name)} (${escapeHtml(s.time)})
+      ${escapeHtml(s.name)} (${escapeHtml(s.time)} · ${escapeHtml(repeatDescription(s))})
     </label>`).join('');
   }
 
@@ -274,13 +445,18 @@
         </div>
         <div class="two-fields form-grid">
           <label class="field">Name<input name="name" maxlength="40" required value="${escapeHtml(s.name)}" /></label>
+          <label class="field">First date<input name="startDate" type="date" required value="${escapeHtml(s.startDate || dateKey())}" /></label>
+          <label class="field">Schedule repeats<select name="repeat" class="repeat-select">${[
+            ['once','Does not repeat'],['daily','Every day'],['weekly','Every week'],['monthly','Every month'],['yearly','Every year'],['custom','Custom weekdays']
+          ].map(([value,label])=>`<option value="${value}" ${(s.repeat || 'daily')===value?'selected':''}>${label}</option>`).join('')}</select></label>
           <label class="field">Exercise time<input type="text" class="clock-input" inputmode="none" readonly name="time" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.time)}" /></label>
-          <label class="field">Repeat from<input type="text" class="clock-input" inputmode="none" readonly name="start" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.start)}" /></label>
+          <label class="field">First reminder<input type="text" class="clock-input" inputmode="none" readonly name="start" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.start)}" /></label>
           <label class="field">Last reminder by<input type="text" class="clock-input" inputmode="none" readonly name="end" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.end)}" /></label>
-          <label class="field">Repeat every<select name="interval">
+          <label class="field">Reminder interval<select name="interval">
             ${[5, 10, 15, 30, 60].map(n => `<option value="${n}" ${Number(s.interval) === n ? 'selected' : ''}>${n} minutes</option>`).join('')}
           </select></label>
         </div>
+        <fieldset class="weekday-picker" ${(s.repeat || 'daily')==='custom'?'':'hidden'}><legend>Repeat on these days</legend><div class="weekday-choices">${WEEKDAYS.map((d,i)=>`<label><input type="checkbox" name="weekday" value="${i}" ${(s.weekdays || [0,1,2,3,4]).includes(i)?'checked':''} /><span>${d}</span></label>`).join('')}</div></fieldset>
         <label class="toggle-row"><input type="checkbox" name="enabled" ${s.enabled ? 'checked' : ''} /> Enable reminders</label>
         <div class="form-actions reminder-actions">
           <button type="submit" class="btn btn-secondary">Save settings</button>
@@ -299,7 +475,7 @@
     $('quote-text').textContent = QUOTES[(state.quoteIndex || 0) % QUOTES.length];
     renderReminders();
   }
-  function render() { renderToday(); renderCalendar(); renderManage(); renderSettings(); renderContacts(); }
+  function render() { renderToday(); renderCalendar(); renderManage(); renderSettings(); renderContacts(); renderFriends(); }
 
   function closeExerciseForm() {
     $('exercise-form').hidden = true;
@@ -362,10 +538,14 @@
     else delete state.log[day][key];
     if (!input.checked && state.ratings[day]) delete state.ratings[day][key];
     save(); renderToday(); renderCalendar();
-    if (input.checked) openRating(day, key);
-    if (input.checked && remaining(input.dataset.session).length === 0) {
-      const session = state.sessions.find(s => s.id === input.dataset.session);
-      showToast(`${session?.name || 'Session'} complete! No more reminders for this session today.`);
+    if (input.checked) {
+      const sessionFinished = remaining(input.dataset.session).length === 0;
+      showCompletionCheer(sessionFinished);
+      openRating(day, key, true);
+      if (sessionFinished) {
+        const session = state.sessions.find(s => s.id === input.dataset.session);
+        showToast(`${session?.name || 'Session'} complete! No more reminders for this session today.`);
+      }
     }
   });
 
@@ -373,8 +553,10 @@
   for (const id of ['rating-pain','rating-difficulty']) {
     $(id).innerHTML += Array.from({length:11}, (_, i) => `<option value="${i}">${i} / 10</option>`).join('');
   }
-  function openRating(day, key) {
+  function openRating(day, key, justCompleted = false) {
     ratingTarget = {day,key};
+    ratingNewCompletion = justCompleted;
+    $('rating-title').textContent = justCompleted ? 'Good job! Exercise logged 🌟' : 'Optional exercise check-in';
     const previous = state.ratings[day]?.[key];
     $('rating-pain').value = previous?.pain === null || previous?.pain === undefined ? '' : String(previous.pain);
     $('rating-difficulty').value = previous?.difficulty === null || previous?.difficulty === undefined ? '' : String(previous.difficulty);
@@ -398,13 +580,52 @@
     $('rating-dialog').close();
   });
   $('skip-rating').addEventListener('click', () => $('rating-dialog').close());
-  $('rating-dialog').addEventListener('close', () => { ratingTarget = null; });
+  $('rating-dialog').addEventListener('close', () => {
+    if (ratingNewCompletion) showToast('Good job! Your exercise was logged. 🌟');
+    ratingTarget = null;
+    ratingNewCompletion = false;
+  });
 
   $('prev-month').addEventListener('click', () => {calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth()-1,1); renderCalendar();});
   $('next-month').addEventListener('click', () => {calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth()+1,1); renderCalendar();});
   $('calendar-grid').addEventListener('click', event => {
     const button = event.target.closest('[data-day]');
     if (button) { calendarSelected = button.dataset.day; renderCalendar(); }
+  });
+  $('day-plan-list').addEventListener('click',event=>{
+    const edit=event.target.closest('.edit-occurrence');
+    if (edit) return openOccurrence(edit.dataset.id,calendarSelected);
+    const restore=event.target.closest('.restore-occurrence');
+    if (restore) {
+      const key=scheduleOverrideKey(calendarSelected,restore.dataset.id);
+      delete state.scheduleOverrides[key];
+      refreshScheduleView();
+      showToast('Session restored for this date.');
+    }
+  });
+  $('occurrence-cancel').addEventListener('click',()=> $('occurrence-dialog').close());
+  $('occurrence-dialog').addEventListener('close',()=> {editingOccurrence=null;});
+  $('occurrence-save').addEventListener('click',()=>{
+    if (!editingOccurrence) return;
+    const {id,day}=editingOccurrence;
+    const time=$('occurrence-time').value;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return showToast('Choose a valid time.');
+    const s=state.sessions.find(s=>s.id===id);
+    if (!s) return;
+    const key=scheduleOverrideKey(day,id);
+    if (time===s.time) delete state.scheduleOverrides[key];
+    else state.scheduleOverrides[key]={time};
+    $('occurrence-dialog').close();
+    refreshScheduleView();
+    showToast('Updated only this date.');
+  });
+  $('occurrence-skip').addEventListener('click',()=>{
+    if (!editingOccurrence) return;
+    const {id,day}=editingOccurrence;
+    state.scheduleOverrides[scheduleOverrideKey(day,id)]={skipped:true};
+    $('occurrence-dialog').close();
+    refreshScheduleView();
+    showToast('Skipped this date. Other repetitions are unchanged.');
   });
 
   // Embed only vetted YouTube IDs; do not store local video files or load remote content automatically.
@@ -413,6 +634,7 @@
     if (!button || !validVideoId(button.dataset.video)) return;
     $('video-title').textContent = button.dataset.name || 'Exercise demonstration';
     $('video-iframe').src = `https://www.youtube-nocookie.com/embed/${button.dataset.video}`;
+    $('video-youtube-link').href = `https://www.youtube.com/watch?v=${button.dataset.video}`;
     $('video-dialog').showModal();
   });
   $('close-video').addEventListener('click', () => $('video-dialog').close());
@@ -580,7 +802,17 @@
   });
 
   // Each session can have its own time, repeat window, and reminder interval.
-  $('add-session-btn').addEventListener('click', () => { $('add-session-form').hidden = !$('add-session-form').hidden; });
+  populateWeekdayPicker('new-session-weekdays');
+  $('new-session-repeat').addEventListener('change',()=>showWeekdays($('new-session-repeat'),$('new-session-weekdays')));
+  $('reminder-sessions').addEventListener('change',event=>{
+    const select=event.target.closest('.repeat-select');
+    if (select) showWeekdays(select,select.closest('.reminder-session').querySelector('.weekday-picker'));
+  });
+  $('day-add-session').addEventListener('click',()=>openAddSession(calendarSelected));
+  $('add-session-btn').addEventListener('click', () => {
+    if (!$('add-session-form').hidden) $('add-session-form').hidden=true;
+    else openAddSession(dateKey());
+  });
   $('cancel-session-btn').addEventListener('click', () => { $('add-session-form').hidden = true; });
   $('add-session-form').addEventListener('submit', event => {
     event.preventDefault();
@@ -589,14 +821,25 @@
     if (!name || !time) return;
     const window = createWindow(time);
     const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    state.sessions.push({ id, name, time, enabled: false, ...window, interval: 15 });
+    const startDate = $('new-session-date').value || dateKey();
+    const repeat = $('new-session-repeat').value;
+    const weekdays=selectedWeekdays($('new-session-weekdays'));
+    if (repeat==='custom' && !weekdays.length) return showToast('Choose at least one weekday.');
+    const session={ id, name, time, enabled: false, ...window, interval: 15, startDate, repeat, weekdays };
+    state.sessions.push(session);
+    for (const checkbox of $('new-session-exercises').querySelectorAll('input:checked')) {
+      const ex=state.exercises.find(ex=>ex.id===checkbox.value);
+      if (ex && !ex.sessionIds.includes(id)) ex.sessionIds.push(id);
+    }
     state.sessions.sort((a, b) => a.time.localeCompare(b.time));
     save();
     $('add-session-form').hidden = true;
     $('new-session-name').value = '';
+    calendarSelected=startDate;
+    calendarCursor=new Date(`${startDate.slice(0,7)}-01T12:00:00`);
     render();
     if (!$('exercise-form').hidden) closeExerciseForm();
-    showToast('Session added. Assign exercises to it using Edit.');
+    showToast('Session added to your calendar.');
   });
   $('reminder-sessions').addEventListener('submit', event => {
     const form = event.target.closest('.reminder-session');
@@ -613,13 +856,18 @@
       showToast('Choose a reminder end time later than its start time (same day).');
       return;
     }
-    Object.assign(session, { name, time, start, end, interval: Number(fields.get('interval')), enabled: fields.has('enabled') });
+    const repeat=String(fields.get('repeat') || 'daily');
+    const weekdays=fields.getAll('weekday').map(Number);
+    if (repeat==='custom' && !weekdays.length) return showToast('Choose at least one weekday.');
+    const startDate=String(fields.get('startDate') || dateKey());
+    if (!session.startDate) session.pastDailyBefore = startDate; // Old sessions were daily before this edit.
+    Object.assign(session, { name, time, start, end, interval: Number(fields.get('interval')), enabled: fields.has('enabled'), repeat, weekdays, startDate });
     state.sessions.sort((a, b) => a.time.localeCompare(b.time));
     // Allow the current time slot to be checked again after an edit; never carry a stale slot.
     delete state.lastSent[`${dateKey()}_${session.id}`];
     save(); render();
     if (!$('exercise-form').hidden) closeExerciseForm();
-    showToast('Reminder settings saved.');
+    showToast('Session schedule saved.');
   });
   $('reminder-sessions').addEventListener('click', event => {
     const remove = event.target.closest('.remove-session');
@@ -711,7 +959,7 @@
   }
   function sendReminder(session, pendingCount, isDemo = false, isLast = false) {
     previewSessionId = session.id || state.sessions[0]?.id || null;
-    const title = `PhysioAlly · ${session.name} reminder${isDemo ? ' (demo)' : ''}`;
+    const title = `PhysioAlly · ${session.name} reminder`; 
     const body = pendingCount
       ? `${pendingCount} exercise${pendingCount === 1 ? '' : 's'} left in this session.${isLast ? ' This is the last scheduled reminder for this session.' : ''} ${nextQuote()}`
       : `A sample reminder for your ${session.name.toLowerCase()} session. ${nextQuote()}`;
@@ -730,7 +978,7 @@
     save();
     if ('Notification' in window && Notification.permission === 'default') {
       const allowed = await askForNotificationPermission();
-      if (allowed) sendSystemNotification(`PhysioAlly · ${session?.name || 'Physiotherapy'} reminder (demo)`, $('preview-body').textContent);
+      if (allowed) sendSystemNotification(`PhysioAlly · ${session?.name || 'Physiotherapy'} reminder`, $('preview-body').textContent);
     }
   });
 
@@ -772,7 +1020,7 @@
     } else if (reason === 'pain') {
       panel.innerHTML = `<strong>Your well-being comes first.</strong><p>You can pause reminders for today or contact someone you trust. Follow your physiotherapist's advice for pain or symptom changes; this app cannot decide whether exercise is safe.</p><div class="buddy-buttons"><button type="button" class="btn buddy-pause">Pause reminders for today</button><button type="button" class="btn btn-secondary buddy-contact">Contact someone</button></div>`;
     } else {
-      panel.innerHTML = '<strong>Asking for help is okay.</strong><p>Choose a saved contact and preview a help request. The Send button only simulates sending for this demo.</p><button type="button" class="btn buddy-contact">Contact someone</button>';
+      panel.innerHTML = '<strong>Asking for help is okay.</strong><p>Choose a saved contact and prepare a help request.</p><button type="button" class="btn buddy-contact">Contact someone</button>';
     }
   });
   $('buddy-response').addEventListener('click', async event => {
@@ -791,6 +1039,109 @@
       const preference = state.reasons[`${dateKey()}_${buddySessionId}`] === 'pain' ? 'pain' : 'checkin';
       $('buddy-dialog').close(); openHelp(null, preference);
     }
+  });
+
+  // Social feature for presentation only. These two identities and their progress
+  // are fictional, deterministic, and are not synced with another account.
+  const DEMO_FRIENDS = [
+    { id: 'bob', name: 'Bob', handle: '@bob_moves', initials: 'B', motto: 'Finding my rhythm, one day at a time.' },
+    { id: 'kirkinator', name: 'Kirkinator9000', handle: '@kirkinator9000', initials: 'K', motto: 'Some days are harder, and that is okay.' }
+  ];
+  const FRIEND_MESSAGES = {
+    gentle: 'Hey! Just checking in. Hope you are doing okay today. No pressure to reply 💙',
+    celebrate: 'I noticed your recent progress — nice work! Remember that every step counts 🌟',
+    support: 'Hope your day is going okay! If you need someone to listen or help, I am here 💛'
+  };
+  function demoFriendDays(friendId) {
+    const results = [];
+    // Most recent day always shows at the end; the fixtures remain stable on reload.
+    for (let back = 27; back >= 0; back--) {
+      const d = new Date();
+      d.setHours(12,0,0,0);
+      d.setDate(d.getDate()-back);
+      let status;
+      if (friendId === 'bob') status = back === 23 || back === 15 ? 'paused' : back === 22 ? 'partial' : 'completed';
+      else status = [26,15,7].includes(back) ? 'completed'
+        : [24,18,14,5,2].includes(back) ? 'partial'
+        : [22,12,8,1].includes(back) ? 'paused' : 'missed';
+      results.push({day:dateKey(d),status});
+    }
+    return results;
+  }
+  function friendMetrics(days) {
+    const completed = days.filter(d => d.status === 'completed').length;
+    const paused = days.filter(d => d.status === 'paused').length;
+    const partial = days.filter(d => d.status === 'partial').length;
+    let streak = 0;
+    for (let i=days.length-1; i>=0 && days[i].status === 'completed'; i--) streak++;
+    return { completed, paused, partial, streak };
+  }
+  function renderFriends() {
+    $('friends-list').innerHTML = DEMO_FRIENDS.map(f => {
+      const m = friendMetrics(demoFriendDays(f.id));
+      const messages = Array.isArray(state.friendMessages[f.id]) ? state.friendMessages[f.id].length : 0;
+      return `<div class="friend-item">
+        <div class="friend-avatar" aria-hidden="true">${f.initials}</div>
+        <div class="friend-summary">
+          <div class="friend-name">${escapeHtml(f.name)}</div>
+          <div class="friend-handle">${escapeHtml(f.handle)} · ${m.streak} day streak</div>
+          <div class="friend-subtext">${m.completed}/28 complete days · ${m.paused} pause days</div>
+          ${messages ? `<div class="friend-message-count">${messages} encouragement${messages === 1 ? '' : 's'} prepared</div>` : ''}
+        </div>
+        <div class="friend-actions">
+          <button type="button" class="btn btn-secondary friend-view" data-friend="${f.id}">View progress</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  function openFriend(friendId, focusMessage = false) {
+    const friend = DEMO_FRIENDS.find(f => f.id === friendId);
+    if (!friend) return;
+    activeFriendId = friend.id;
+    const days = demoFriendDays(friend.id), metrics = friendMetrics(days);
+    $('friend-title').textContent = friend.name;
+    $('friend-caption').textContent = `${friend.handle} · ${friend.motto}`;
+    $('friend-stats').innerHTML = `
+      <div><strong>${metrics.streak}</strong><small>Current-day streak</small></div>
+      <div><strong>${metrics.completed}/28</strong><small>Completed days</small></div>
+      <div><strong>${metrics.paused}</strong><small>Paused days</small></div>`;
+    const start = new Date(`${days[0].day}T12:00:00`);
+    const end = new Date(`${days.at(-1).day}T12:00:00`);
+    $('friend-range').textContent = `${start.toLocaleDateString(undefined, {month:'short',day:'numeric'})} – ${end.toLocaleDateString(undefined, {month:'short',day:'numeric'})}`;
+    $('friend-calendar').innerHTML = days.map(d => {
+      const dayNum = Number(d.day.slice(-2));
+      const text = d.status === 'missed' ? 'Not logged' : d.status === 'completed' ? 'Completed' : d.status === 'partial' ? 'Partially completed' : 'Paused';
+      return `<div class="friend-day ${d.status}" title="${escapeHtml(d.day)}: ${text}" aria-label="${escapeHtml(d.day)}: ${text}">${dayNum}</div>`;
+    }).join('');
+    $('friend-message').value = FRIEND_MESSAGES.gentle;
+    $('friend-demo-status').textContent = '';
+    $('friend-dialog').showModal();
+    if (focusMessage) $('friend-message').focus();
+  }
+  $('friends-list').addEventListener('click', event => {
+    const button = event.target.closest('[data-friend]');
+    if (!button) return;
+    openFriend(button.dataset.friend, button.classList.contains('friend-encourage'));
+  });
+  $('friend-close').addEventListener('click', () => $('friend-dialog').close());
+  $('friend-dialog').addEventListener('click', event => {
+    if (event.target === $('friend-dialog')) $('friend-dialog').close();
+  });
+  $('friend-presets').addEventListener('click', event => {
+    const button = event.target.closest('[data-kind]');
+    if (button && Object.hasOwn(FRIEND_MESSAGES,button.dataset.kind)) {
+      $('friend-message').value = FRIEND_MESSAGES[button.dataset.kind];
+      $('friend-demo-status').textContent = '';
+    }
+  });
+  $('friend-send').addEventListener('click', () => {
+    if (!activeFriendId) return;
+    const message = $('friend-message').value.trim();
+    if (!message) { $('friend-demo-status').textContent = 'Please write a message first.'; return; }
+    if (!Array.isArray(state.friendMessages[activeFriendId])) state.friendMessages[activeFriendId] = [];
+    state.friendMessages[activeFriendId].push({ message, at: new Date().toISOString() });
+    save(); renderFriends();
+    $('friend-demo-status').textContent = '✓ Message prepared (preview only — not delivered).';
   });
 
   // Trusted contacts are stored in the current browser, alongside the user's exercise data.
@@ -816,7 +1167,7 @@
           <div class="contact-detail">${c.phone ? escapeHtml(c.phone) : ''}${c.phone && c.email ? ' · ' : ''}${c.email ? escapeHtml(c.email) : ''}</div>
         </div>
         <div class="contact-buttons">
-          <button class="btn-quiet contact-help" data-id="${escapeHtml(c.id)}" type="button">Send demo</button>
+          <button class="btn-quiet contact-help" data-id="${escapeHtml(c.id)}" type="button">Request help</button>
           <button class="btn-quiet contact-edit" data-id="${escapeHtml(c.id)}" type="button">Edit</button>
           <button class="btn-quiet btn-danger contact-remove" data-id="${escapeHtml(c.id)}" type="button">Remove</button>
         </div>
@@ -916,9 +1267,10 @@
     const at = now.getHours() * 60 + now.getMinutes();
     let changed = false;
     for (const session of state.sessions) {
-      if (!session.enabled || sessionIsPaused(session.id, day) || !remaining(session.id, day).length) continue;
+      if (!sessionOccurs(session,day) || !session.enabled || sessionIsPaused(session.id, day) || !remaining(session.id, day).length) continue;
       if (Date.now() < Number(state.snoozedUntil[`${day}_${session.id}`] || 0)) continue;
-      const from = minutes(session.start), until = minutes(session.end);
+      const window=occurrenceWindow(session,day);
+      const from = minutes(window.start), until = minutes(window.end);
       const gap = Number(session.interval);
       if (!gap || !Number.isFinite(from) || !Number.isFinite(until) || at < from || at > until) continue;
       const key = `${day}_${session.id}`;
@@ -940,7 +1292,7 @@
     if (state.settings.finalOn && state.finalSent !== day) {
       const finalAt = minutes(state.settings.finalTime || '22:30');
       if (at >= finalAt && at <= finalAt + 15) {
-        const pending = state.sessions.filter(s => minutes(s.time) <= at && !sessionIsPaused(s.id,day))
+        const pending = state.sessions.filter(s => sessionOccurs(s,day) && minutes(sessionTimeFor(s,day)) <= at && !sessionIsPaused(s.id,day))
           .reduce((sum,s) => sum + remaining(s.id, day).length, 0);
         state.finalSent = day;
         if (pending) {
@@ -962,6 +1314,7 @@
     if (changed) save();
   }
 
+  seedV13DemoItems();
   render();
   rotateHeaderQuote(); // New quote on each visit, including a refresh.
   setInterval(rotateHeaderQuote, HEADER_QUOTE_INTERVAL_MS);

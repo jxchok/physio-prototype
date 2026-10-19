@@ -4,7 +4,7 @@
     button,input,select,textarea {font:inherit;}
     button {cursor:pointer;}
     button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible {outline:3px solid #a0bbeb; outline-offset:2px;}
-    header {border-bottom:1px solid #e3e8ee; background:white;}
+    header {position:sticky; top:0; z-index:20; border-bottom:1px solid #e3e8ee; background:white; box-shadow:0 2px 8px rgba(0,0,0,.05);}
     .wrap {width:min(100% - 36px,1010px); margin-inline:auto;}
     .top {min-height:91px; display:grid; grid-template-columns:minmax(215px,.9fr) minmax(0,1.7fr); align-items:center; gap:28px;}
     .header-identity {display:flex; flex-direction:column; justify-content:center; min-width:0;}
@@ -239,3 +239,79 @@ header {position:sticky; top:0; z-index:20; box-shadow:0 2px 8px rgba(0,0,0,.05)
 .demo-disclaimer {font-size:.88rem; border-radius:9px; border:1px solid #f0dfb7; color:#745120; background:#fff9ee; padding:12px; margin:10px 0;}
 .help-success .form-actions {justify-content:center;}
 .help-success .form-actions .btn {min-width:110px;}
+
+/* PhysioAlly v11 — completion acknowledgement and fictional social preview */
+.completion-cheer {margin:13px 0 3px; padding:12px 14px; background:#ecf7f0; border:1px solid #b9dbc7; border-radius:9px; color:#2c624a; font-size:.9rem; font-weight:650;}
+.demo-pill {font-size:.73rem; font-weight:700; color:#5b6f89; background:#eef3f9; border-radius:99px; padding:5px 9px;}
+.friends-list {display:grid; gap:11px;}
+.friend-item {display:grid; grid-template-columns:41px minmax(0,1fr); column-gap:11px; row-gap:10px; padding:13px; border:1px solid #e1e8f0; border-radius:10px; background:#fcfdff; align-items:start;}
+.friend-avatar {display:grid; place-items:center; width:41px; height:41px; border-radius:50%; background:#e5edf8; color:#345e8a; font-weight:800; font-size:1rem;}
+.friend-item:nth-child(2) .friend-avatar {background:#efeaf8; color:#775b9b;}
+.friend-summary {min-width:0;}
+.friend-name {font-size:.94rem; font-weight:750; overflow-wrap:anywhere;}
+.friend-handle {font-size:.77rem; color:#64788c; overflow-wrap:anywhere;}
+.friend-subtext {font-size:.75rem; color:#5d6b7c; margin-top:4px;}
+.friend-message-count {font-size:.74rem; color:#34765e; margin-top:3px;}
+.friend-actions {grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:8px;}
+.friend-actions .btn {padding:7px 10px; font-size:.78rem;}
+.friend-dialog {width:min(590px,calc(100vw - 28px));}
+.friend-modal-head {display:flex; justify-content:space-between; gap:12px; align-items:start;}
+.eyebrow {text-transform:uppercase; font-size:.7rem; letter-spacing:.06em; font-weight:800; color:#6c8198; margin:0 0 5px;}
+.friend-modal-head h2 {font-size:1.35rem; margin:0 0 3px;}
+.friend-modal-head .section-note {margin:0;}
+.friend-stats {display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; margin:18px 0;}
+.friend-stats > div {padding:11px 8px; background:#f4f7fb; border-radius:9px; text-align:center;}
+.friend-stats strong {display:block; font-size:1.26rem;}
+.friend-stats small {display:block; color:#67798a; font-size:.73rem; line-height:1.25;}
+.friend-month-title {display:flex; justify-content:space-between; gap:8px; align-items:center; font-weight:750; margin-bottom:11px; font-size:.9rem;}
+.friend-month-title span {font-size:.73rem; color:#6c798a; font-weight:500;}
+.friend-calendar {display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px;}
+.friend-day {min-width:0; aspect-ratio:1.2; border-radius:7px; display:grid; place-items:center; font-size:.75rem; font-weight:700; background:#eef1f5; color:#788697;}
+.friend-day.completed {background:#dcefe6; color:#205d46;}
+.friend-day.partial {background:#fff0d4; color:#7d5619;}
+.friend-day.paused {background:#e9e1f5; color:#6a4b8b;}
+.friend-legend {margin-top:12px;}
+.friend-compose {border-top:1px solid #e5eaf0; margin-top:19px; padding-top:16px;}
+.friend-compose h3 {font-size:1rem; margin:0 0 5px;}
+.friend-presets {display:flex; flex-wrap:wrap; gap:7px; margin-bottom:13px;}
+.friend-presets .btn {font-size:.77rem; padding:7px 10px;}
+.friend-compose textarea {width:100%; border:1px solid #cfd9e4; border-radius:8px; padding:10px; resize:vertical; min-height:75px; background:white; color:#253444;}
+.friend-compose-bottom {display:flex; justify-content:space-between; gap:9px; align-items:center; margin-top:12px; flex-wrap:wrap;}
+.friend-compose-bottom .muted {flex:1; margin:0; font-size:.8rem; color:#33735d;}
+@media (max-width:450px) {.friend-dialog{padding:17px;} .friend-calendar{gap:4px;} .friend-day{font-size:.71rem;} .friend-stats strong{font-size:1.08rem;} .friend-presets .btn{flex:1;}}
+
+/* Version 14 — calendar planning, recurrence and per-date exceptions */
+.calendar-day {min-height:74px; height:auto; aspect-ratio:auto; padding:5px 3px; display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start; text-align:left; gap:3px;}
+.calendar-number {font-weight:750; font-size:.83rem; align-self:flex-start; padding-left:4px;}
+.calendar-events {display:flex; flex-direction:column; gap:2px; width:100%; min-width:0;}
+.calendar-event {display:block; width:100%; padding:2px 4px; border-radius:3px; background:rgba(35,86,145,.12); color:#21486c; font-size:.63rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.calendar-event-more {font-size:.62rem; color:#445e7a; text-align:center;}
+.calendar-day.paused .calendar-event {background:rgba(103,66,143,.11); color:#603d84;}
+.calendar-day.selected {box-shadow:inset 0 0 0 1px #2c5c90;}
+.day-plan {border-top:1px solid #e8edf4; margin-top:14px; padding-top:14px;}
+.day-plan-head {display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:10px; flex-wrap:wrap;}
+.day-plan-head strong {font-size:.88rem;}
+.day-plan-head .btn {padding:6px 10px; font-size:.78rem;}
+.day-plan-item {display:flex; justify-content:space-between; align-items:center; gap:9px; border:1px solid #e6edf5; border-radius:8px; padding:10px 11px; margin-top:7px; background:#fcfdff;}
+.day-plan-item.skipped {opacity:.73; background:#f3eff8;}
+.day-plan-info {display:grid; gap:2px; min-width:0;}
+.day-plan-info strong {font-size:.84rem; overflow-wrap:anywhere;}
+.day-plan-info span {font-size:.73rem; color:#647587; overflow-wrap:anywhere;}
+.day-plan-item .btn {font-size:.74rem; padding:6px 9px; white-space:nowrap;}
+.day-plan-empty {color:#788696; font-size:.83rem; padding:8px 0;}
+.weekday-picker {border:1px solid #dce5ee; border-radius:8px; padding:8px 10px 11px; margin:12px 0 9px; min-width:0;}
+.weekday-picker legend {font-weight:650; font-size:.82rem; padding:0 4px;}
+.weekday-choices {display:flex; gap:6px; flex-wrap:wrap;}
+.weekday-choices label {cursor:pointer; position:relative;}
+.weekday-choices input {position:absolute; opacity:0; width:1px; height:1px;}
+.weekday-choices span {display:grid; place-items:center; min-width:39px; height:35px; padding:4px 6px; border:1px solid #d3deea; border-radius:7px; color:#496179; background:white; font-size:.76rem; font-weight:650;}
+.weekday-choices input:checked + span {background:#2c5c90; color:#fff; border-color:#2c5c90;}
+.weekday-choices input:focus-visible + span {outline:3px solid #a0bbeb; outline-offset:2px;}
+.occurrence-actions {flex-wrap:wrap;}
+@media(max-width:740px) {
+  .calendar-day {min-height:51px; padding:4px 2px; gap:2px;}
+  .calendar-number {font-size:.76rem; padding-left:1px;}
+  .calendar-event {font-size:.58rem; padding:1px 2px;}
+  .calendar-event:nth-child(n+2),.calendar-event-more {display:none;}
+  .day-plan-item {flex-wrap:wrap;}
+}

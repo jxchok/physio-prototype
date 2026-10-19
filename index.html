@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light" />
   <title>PhysioAlly — Physiotherapy Tracker</title>
-  <link rel="stylesheet" href="style.css?v=10.0" />
-  <script src="script.js?v=10.0" defer></script>
+  <link rel="stylesheet" href="style.css?v=14.0" />
+  <script src="script.js?v=14.0" defer></script>
 </head>
 <body>
   <header>
     <div class="wrap top">
       <div class="header-identity">
         <div class="brand">PhysioAlly</div>
-        <span class="top-note">Physiotherapy tracker · Prototype</span>
+        <span class="top-note">Physiotherapy tracker</span>
       </div>
       <div class="header-motivation" aria-label="Motivational quote">
         <span class="quote-mark" aria-hidden="true">“</span>
@@ -45,22 +45,27 @@
             <p>You logged a higher pain level today. If you need assistance, you can choose to contact someone you trust.</p>
             <button type="button" class="btn btn-secondary" id="high-pain-help">Request help</button>
           </div>
+          <div id="completion-cheer" class="completion-cheer" role="status" aria-live="polite" hidden></div>
           <div id="today-sessions"></div>
         </section>
 
         <section class="card" aria-labelledby="calendar-heading">
           <div class="card-head">
-            <h2 id="calendar-heading">Progress calendar</h2>
+            <h2 id="calendar-heading">Calendar & schedule</h2>
             <div class="calendar-nav">
               <button type="button" class="btn-quiet" id="prev-month" aria-label="Previous month">‹</button>
               <strong id="calendar-month"></strong>
               <button type="button" class="btn-quiet" id="next-month" aria-label="Next month">›</button>
             </div>
           </div>
-          <p class="section-note">See completed, partial and missed exercise days. Select a day to view its progress.</p>
+          <p class="section-note">See your exercise sessions and progress. Select a date to plan or adjust that day.</p>
           <div class="calendar-grid" id="calendar-grid" aria-label="Monthly exercise calendar"></div>
           <div class="calendar-legend"><span><i class="legend-dot completed"></i>Complete</span><span><i class="legend-dot partial"></i>Partial</span><span><i class="legend-dot paused"></i>Paused</span><span><i class="legend-dot missed"></i>Not logged</span></div>
           <p class="calendar-detail" id="calendar-detail" aria-live="polite"></p>
+          <div class="day-plan" id="day-plan">
+            <div class="day-plan-head"><strong id="day-plan-date">Selected day</strong><button type="button" class="btn btn-secondary" id="day-add-session">+ Session on this date</button></div>
+            <div id="day-plan-list"></div>
+          </div>
         </section>
 
         <section class="card" aria-labelledby="manage-heading">
@@ -100,7 +105,7 @@
             <h2 id="reminder-heading">Sessions & reminders</h2>
             <button class="btn btn-secondary" type="button" id="add-session-btn">+ Add session</button>
           </div>
-          <p class="section-note">Set sessions, reminder intervals and a last-reminder cutoff for each session. Repeats stop once all exercises are completed or reminders are paused.</p>
+          <p class="section-note">Choose a date, a repeat pattern and your reminder window. For a one-day change, select that date in the calendar.</p>
           <form id="add-session-form" class="form" hidden>
             <div class="form-grid two-fields">
               <label class="field">Session name
@@ -109,7 +114,22 @@
               <label class="field">Exercise time
                 <input id="new-session-time" class="clock-input" type="text" inputmode="none" readonly value="14:00" required aria-haspopup="dialog" title="Choose a time using the clock" />
               </label>
+              <label class="field">First date
+                <input id="new-session-date" type="date" required />
+              </label>
+              <label class="field">Schedule repeats
+                <select id="new-session-repeat">
+                  <option value="once">Does not repeat</option>
+                  <option value="daily" selected>Every day</option>
+                  <option value="weekly">Every week</option>
+                  <option value="monthly">Every month</option>
+                  <option value="yearly">Every year</option>
+                  <option value="custom">Custom weekdays</option>
+                </select>
+              </label>
             </div>
+            <fieldset id="new-session-weekdays" class="weekday-picker" hidden><legend>Repeat on these days</legend><div class="weekday-choices"></div></fieldset>
+            <fieldset class="session-picker"><legend>Exercises for this session</legend><div id="new-session-exercises"></div></fieldset>
             <div class="form-actions">
               <button type="submit" class="btn">Add session</button>
               <button type="button" class="btn btn-secondary" id="cancel-session-btn">Cancel</button>
@@ -135,7 +155,18 @@
             <button type="button" class="btn" id="test-notification-btn">Test notification</button>
           </div>
           <label class="toggle-row quote-toggle"><input id="hourly-on" type="checkbox" /> Hourly encouragement notifications (while page is open)</label>
-          <p class="muted" id="notification-status">The test button always opens a notification preview. System notifications need browser permission and HTTPS. Timed reminders only run while this page is open.</p>
+          <p class="muted" id="notification-status" aria-live="polite"></p>
+        </section>
+
+        <!-- Social demo: fictional opt-in progress sharing, separate from urgent support contacts. -->
+        <section class="card" aria-labelledby="friends-heading" id="friends-card">
+          <div class="card-head">
+            <h2 id="friends-heading">Friends & encouragement</h2>
+            
+          </div>
+          <p class="section-note">View a friend's progress and send encouragement. Bob and Kirkinator9000 are sample profiles.</p>
+          <div id="friends-list" class="friends-list"></div>
+          
         </section>
 
         <section class="card" aria-labelledby="contacts-heading" id="contacts-card">
@@ -143,7 +174,7 @@
             <h2 id="contacts-heading">Emergency & support contacts</h2>
             <button type="button" class="btn btn-secondary" id="add-contact-btn">+ Add contact</button>
           </div>
-          <p class="section-note">Save trusted people for your support network. This prototype demonstrates how a help request would work.</p>
+          <p class="section-note">Keep trusted people close when you need support.</p>
           <form id="contact-form" class="form" hidden>
             <div class="form-grid">
               <label class="field">Name
@@ -163,13 +194,28 @@
           </form>
           <div id="contacts-list"></div>
           <button type="button" class="btn support-main-action" id="request-help-btn">Request help</button>
-          <p class="muted"><strong>Demo only:</strong> pressing Send shows a confirmation screen. No real SMS, email or emergency alert is delivered. Contacts stay in this browser.</p>
+          
           <p class="safety-note"><strong>Urgent symptoms?</strong> Severe or worsening pain accompanied by new leg weakness, numbness around the groin, or loss of bladder/bowel control needs urgent medical assessment. Do not wait for a contact to respond. In Singapore, call 995 for an emergency ambulance.</p>
         </section>
       </div>
     </div>
-    <p class="footnote">Prototype · Saved locally in this browser · Follow your physiotherapist's advice; this website does not verify exercise technique or tell you when to push through pain.</p>
+    <p class="footnote">Your plan is saved on this device. Follow your physiotherapist's instructions.</p>
   </main>
+
+  <!-- Edit or skip one calendar occurrence without changing the repeating schedule. -->
+  <dialog id="occurrence-dialog" class="simple-dialog" aria-labelledby="occurrence-title">
+    <h2 id="occurrence-title">Edit this day</h2>
+    <p class="section-note" id="occurrence-subtitle"></p>
+    <label class="field">Time for this date
+      <input id="occurrence-time" type="text" class="clock-input" inputmode="none" readonly aria-haspopup="dialog" title="Choose a time using the clock" />
+    </label>
+    <div class="form-actions occurrence-actions">
+      <button type="button" class="btn btn-secondary" id="occurrence-cancel">Cancel</button>
+      <button type="button" class="btn btn-secondary" id="occurrence-skip">Skip this date</button>
+      <button type="button" class="btn" id="occurrence-save">Save for this date</button>
+    </div>
+    <p class="muted">Only this occurrence changes. Other weeks stay on schedule.</p>
+  </dialog>
 
   <!-- A single shared, keyboard-accessible clock picker for all session times. -->
   <dialog id="time-picker" class="time-picker" aria-labelledby="time-picker-title" aria-describedby="time-picker-hint">
@@ -214,6 +260,7 @@
   <dialog id="video-dialog" class="simple-dialog video-dialog" aria-labelledby="video-title">
     <div class="video-head"><h2 id="video-title">Exercise demonstration</h2><button type="button" class="btn-quiet" id="close-video">Close ×</button></div>
     <div class="video-frame"><iframe id="video-iframe" title="YouTube exercise demonstration" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>
+    <p class="muted">If the embedded player is unavailable, <a id="video-youtube-link" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer">watch the demonstration on YouTube</a>.</p>
     <p class="muted">Only use demonstrations appropriate to your clinician-prescribed exercise plan. Videos are supplied by the user, not verified by this website.</p>
   </dialog>
 
@@ -229,6 +276,44 @@
     </div>
     <div id="buddy-response" class="buddy-response" hidden></div>
     <div class="form-actions"><button type="button" class="btn btn-secondary" id="buddy-back" hidden>Back</button><button type="button" class="btn btn-secondary" id="buddy-close">Close</button></div>
+  </dialog>
+
+  <!-- Demo social area: fictional friends and simulated encouragement. -->
+  <dialog id="friend-dialog" class="simple-dialog friend-dialog" aria-labelledby="friend-title">
+    <div class="friend-modal-head">
+      <div>
+        
+        <h2 id="friend-title">Friend's progress</h2>
+        <p id="friend-caption" class="section-note"></p>
+      </div>
+      <button type="button" class="btn-quiet" id="friend-close">Close ×</button>
+    </div>
+    <div id="friend-stats" class="friend-stats"></div>
+    <div class="friend-month-title">Recent 28 days <span id="friend-range"></span></div>
+    <div id="friend-calendar" class="friend-calendar" aria-label="Friend's last 28 days"></div>
+    <div class="calendar-legend friend-legend">
+      <span><i class="legend-dot completed"></i>Complete</span>
+      <span><i class="legend-dot partial"></i>Partial</span>
+      <span><i class="legend-dot paused"></i>Paused</span>
+      <span><i class="legend-dot missed"></i>Not logged</span>
+    </div>
+    <div class="friend-compose">
+      <h3>Send a little encouragement</h3>
+      <p class="section-note">Be supportive, without judging anyone's pace or rest days.</p>
+      <div class="friend-presets" id="friend-presets">
+        <button type="button" class="btn btn-secondary" data-kind="gentle">Gentle check-in</button>
+        <button type="button" class="btn btn-secondary" data-kind="celebrate">Celebrate progress</button>
+        <button type="button" class="btn btn-secondary" data-kind="support">Offer support</button>
+      </div>
+      <label class="field">Your message
+        <textarea id="friend-message" maxlength="350" rows="3" placeholder="Write an encouraging message..."></textarea>
+      </label>
+      <div class="friend-compose-bottom">
+        <span id="friend-demo-status" class="muted" role="status" aria-live="polite"></span>
+        <button type="button" class="btn" id="friend-send">Send encouragement</button>
+      </div>
+      
+    </div>
   </dialog>
 
   <!-- Presentation demo: explicitly simulated sending; no messages leave the browser. -->
@@ -253,16 +338,16 @@
         <button type="button" class="btn btn-secondary" id="help-cancel">Cancel</button>
         <button type="button" class="btn" id="help-send">Send</button>
       </div>
-      <p class="muted"><strong>Simulation only.</strong> Clicking Send will show a confirmation; it will not contact anyone.</p>
+      
     </div>
     <div id="help-success" class="help-success" hidden role="status" aria-live="polite">
       <div class="help-success-icon" aria-hidden="true">✓</div>
-      <h2 id="help-success-title" tabindex="-1">Message sent!</h2>
+      <h2 id="help-success-title" tabindex="-1">Message prepared</h2>
       <p id="help-success-recipient" class="help-success-recipient"></p>
-      <p class="demo-disclaimer"><strong>Demo only:</strong> no real message or emergency alert was sent.</p>
+      <p class="demo-disclaimer">Preview only · Not delivered.</p>
       <div class="form-actions"><button type="button" class="btn" id="help-success-close">Done</button></div>
     </div>
-    <p class="safety-note">Not an emergency alert service. If immediate medical help is needed, contact local emergency services directly.</p>
+    <p class="safety-note">For urgent medical help, contact local emergency services directly.</p>
   </dialog>
 
   <div id="toast" role="status" aria-live="polite" hidden></div>
