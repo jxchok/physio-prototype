@@ -1,9 +1,9 @@
-// APP_NAME prototype — all data is kept on this device via localStorage.
+// Physio Buddy prototype — all data is kept on this device via localStorage.
 (() => {
   'use strict';
 
   // Keep the old key so existing users do not lose their first-draft exercises.
-  const STORAGE_KEY = 'app_name_physio_first_draft_v1';
+  const STORAGE_KEY = 'Physio Buddy_physio_first_draft_v1';
   // Supportive, locally stored messages for the header and notifications.
   const QUOTES = [
     'Small steps still count.',
@@ -519,7 +519,7 @@
     return QUOTES[randomQuoteIndex(state.quoteIndex)];
   }
   function sendReminder(session, pendingCount, isDemo = false) {
-    const title = `APP_NAME · ${session.name} reminder${isDemo ? ' (demo)' : ''}`;
+    const title = `Physio Buddy · ${session.name} reminder${isDemo ? ' (demo)' : ''}`;
     const body = pendingCount
       ? `${pendingCount} exercise${pendingCount === 1 ? '' : 's'} left in this session. ${nextQuote()}`
       : `A sample reminder for your ${session.name.toLowerCase()} session. ${nextQuote()}`;
@@ -538,7 +538,7 @@
     save();
     if ('Notification' in window && Notification.permission === 'default') {
       const allowed = await askForNotificationPermission();
-      if (allowed) sendSystemNotification(`APP_NAME · ${session?.name || 'Physiotherapy'} reminder (demo)`, $('preview-body').textContent);
+      if (allowed) sendSystemNotification(`Physio Buddy · ${session?.name || 'Physiotherapy'} reminder (demo)`, $('preview-body').textContent);
     }
   });
 
@@ -563,8 +563,8 @@
     if (state.settings.hourlyOn && (!state.lastHourly || Date.now() - state.lastHourly >= 60 * 60 * 1000)) {
       state.lastHourly = Date.now();
       const body = nextQuote();
-      previewNotification('APP_NAME · A little motivation', body);
-      sendSystemNotification('APP_NAME · A little motivation', body);
+      previewNotification('Physio Buddy · A little motivation', body);
+      sendSystemNotification('Physio Buddy · A little motivation', body);
       changed = true;
     }
     if (changed) save();
