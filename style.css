@@ -1,10 +1,27 @@
 :root {font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:#202b36; background:#f7f9fb; font-synthesis:none;}
     * {box-sizing:border-box;}
-    body {margin:0; line-height:1.5;}
-    button,input,select,textarea {font:inherit;}
-    button {cursor:pointer;}
+
+    body {
+      margin:0; 
+      line-height:1.5;
+    }
+
+    button,input,select,textarea {
+      font:inherit;
+    }
+    button {
+      cursor:pointer;
+    }
     button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible {outline:3px solid #a0bbeb; outline-offset:2px;}
-    header {border-bottom:1px solid #e3e8ee; background:white;}
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+
+      border-bottom: 1px solid #e3e8ee; 
+      background: white;
+      box-shadow: 0 2px 8px rgba(0, 0 ,0, 0.05);
+    }
     .wrap {width:min(100% - 36px,1010px); margin-inline:auto;}
     .top {min-height:91px; display:grid; grid-template-columns:minmax(215px,.9fr) minmax(0,1.7fr); align-items:center; gap:28px;}
     .header-identity {display:flex; flex-direction:column; justify-content:center; min-width:0;}
