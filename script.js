@@ -1,9 +1,9 @@
-// Physio Buddy prototype — all data is kept on this device via localStorage.
+// PhysioAlly prototype — all data is kept on this device via localStorage.
 (() => {
   'use strict';
 
   // Keep the old key so existing users do not lose their first-draft exercises.
-  const STORAGE_KEY = 'Physio Buddy_physio_first_draft_v1';
+  const STORAGE_KEY = 'app_name_physio_first_draft_v1';
   // Supportive, locally stored messages for the header and notifications.
   const QUOTES = [
     'Small steps still count.',
@@ -58,7 +58,7 @@
     { id: 'morning', name: 'Morning', time: '09:00', enabled: false, start: '08:45', end: '10:00', interval: 15 },
     { id: 'evening', name: 'Evening', time: '20:00', enabled: false, start: '19:45', end: '21:00', interval: 15 }
   ];
-  const DEFAULT = { exercises: [], log: {}, sessions: INITIAL_SESSIONS, settings: { hourlyOn: false }, quoteIndex: 0, lastHourly: null, lastSent: {}, paused: {} };
+  const DEFAULT = { exercises: [], log: {}, ratings: {}, contacts: [], sessions: INITIAL_SESSIONS, settings: { hourlyOn: false, finalOn: false, finalTime: '22:30' }, quoteIndex: 0, lastHourly: null, lastSent: {}, finalSent: '', paused: {}, snoozedUntil: {}, reasons: {} };
   const $ = id => document.getElementById(id);
   const clone = value => JSON.parse(JSON.stringify(value));
   const pad = n => String(n).padStart(2, '0');
@@ -92,6 +92,11 @@
       loaded.lastSent = data.lastSent && typeof data.lastSent === 'object' ? data.lastSent : {};
       loaded.paused = data.paused && typeof data.paused === 'object' ? data.paused : {};
       loaded.log = data.log && typeof data.log === 'object' ? data.log : {};
+      loaded.ratings = data.ratings && typeof data.ratings === 'object' ? data.ratings : {};
+      loaded.contacts = Array.isArray(data.contacts) ? data.contacts.filter(c => c && typeof c.id === 'string' && typeof c.name === 'string') : [];
+      loaded.reasons = data.reasons && typeof data.reasons === 'object' ? data.reasons : {};
+      loaded.snoozedUntil = data.snoozedUntil && typeof data.snoozedUntil === 'object' ? data.snoozedUntil : {};
+      loaded.finalSent = typeof data.finalSent === 'string' ? data.finalSent : '';
 
       // Convert the original dropdown schedules into selectable session IDs.
       for (const ex of loaded.exercises) {
@@ -105,7 +110,31 @@
 
   let state = load();
   let editingId = null;
+  let editingContactId = null;
   let toastTimer;
+  let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  let calendarSelected = dateKey();
+  let ratingTarget = null;
+  let buddySessionId = null;
+  let previewSessionId = null;
+  const validVideoId = id => /^[a-zA-Z0-9_-]{11}$/.test(id);
+  function youtubeVideoId(url) {
+    if (!url) return '';
+    try {
+      const parsed = new URL(url.trim());
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+      const host = parsed.hostname.toLowerCase();
+      let id = '';
+      if (host === 'youtu.be' || host === 'www.youtu.be') id = parsed.pathname.split('/')[1];
+      else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'].includes(host)) {
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        id = parts[0] === 'watch' ? parsed.searchParams.get('v') : (['shorts', 'embed', 'live'].includes(parts[0]) ? parts[1] : '');
+      } else return null;
+      return validVideoId(id) ? id : null;
+    } catch { return null; }
+  }
+  function logKey(ex, session) { return `${ex}_${session}`; }
+  function sessionIsPaused(id, day = dateKey()) { return Boolean(state.paused[`${day}_${id}`]); }
 
   function save() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -161,18 +190,56 @@
     const percent = total ? Math.round(100 * completed / total) : 0;
     $('progress-percent').textContent = `${percent}%`;
     $('progress-bar').style.width = `${percent}%`;
+    const hasHighPain = Object.values(state.ratings[day] || {}).some(r => r && Number(r.pain) >= 8);
+    $('high-pain-support').hidden = !hasHighPain;
 
-    $('today-sessions').innerHTML = state.sessions.map(s => {
-      const exercises = sessionExercises(s.id, day);
-      const completedHere = exercises.filter(ex => done(day, ex.id, s.id)).length;
-      return `<div class="session" id="session-${escapeHtml(s.id)}">
-        <div class="session-title">${escapeHtml(s.name)} <span class="session-count">${escapeHtml(s.time)} · ${completedHere}/${exercises.length}</span></div>
-        ${exercises.length ? exercises.map(ex => `<label class="exercise ${done(day, ex.id, s.id) ? 'exercise-done' : ''}">
-          <input type="checkbox" data-exercise="${escapeHtml(ex.id)}" data-session="${escapeHtml(s.id)}" ${done(day, ex.id, s.id) ? 'checked' : ''} />
-          <span class="exercise-body"><span class="exercise-name">${escapeHtml(ex.name)}</span>${ex.notes ? `<span class="exercise-instruction">${escapeHtml(ex.notes)}</span>` : ''}</span>
-        </label>`).join('') : '<div class="empty">No exercises scheduled.</div>'}
+    $('today-sessions').innerHTML = state.sessions.map(session => {
+      const exercises = sessionExercises(session.id, day);
+      const completedHere = exercises.filter(ex => done(day, ex.id, session.id)).length;
+      return `<div class="session" id="session-${escapeHtml(session.id)}">
+        <div class="session-title">${escapeHtml(session.name)} <span class="session-count">${escapeHtml(session.time)} · ${completedHere}/${exercises.length}</span></div>
+        ${exercises.length ? exercises.map(ex => {
+          const complete = done(day, ex.id, session.id);
+          const rating = state.ratings[day]?.[logKey(ex.id, session.id)];
+          const ratingInfo = rating && (rating.pain !== null || rating.difficulty !== null)
+            ? `<span class="exercise-rating">${rating.pain !== null ? `Pain ${rating.pain}/10` : ''}${rating.pain !== null && rating.difficulty !== null ? ' · ' : ''}${rating.difficulty !== null ? `Difficulty ${rating.difficulty}/10` : ''}</span>` : '';
+          const video = youtubeVideoId(ex.video || '');
+          return `<div class="exercise ${complete ? 'exercise-done' : ''}">
+            <label class="exercise-main"><input type="checkbox" data-exercise="${escapeHtml(ex.id)}" data-session="${escapeHtml(session.id)}" ${complete ? 'checked' : ''} />
+              <span class="exercise-body"><span class="exercise-name">${escapeHtml(ex.name)}</span>${ex.notes ? `<span class="exercise-instruction">${escapeHtml(ex.notes)}</span>` : ''}${ratingInfo}</span>
+            </label>
+            <div class="exercise-extras">${video ? `<button type="button" class="btn-quiet watch-video" data-video="${video}" data-name="${escapeHtml(ex.name)}">▶ Demo</button>` : ''}${complete ? `<button type="button" class="btn-quiet edit-rating" data-exercise="${escapeHtml(ex.id)}" data-session="${escapeHtml(session.id)}">${ratingInfo ? 'Edit score' : 'Rate'}</button>` : ''}</div>
+          </div>`;
+        }).join('') : '<div class="empty">No exercises scheduled.</div>'}
       </div>`;
     }).join('');
+  }
+
+  function renderCalendar() {
+    const year = calendarCursor.getFullYear(), month = calendarCursor.getMonth();
+    $('calendar-month').textContent = calendarCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const first = new Date(year, month, 1);
+    const firstWeekday = (first.getDay() + 6) % 7;
+    const last = new Date(year, month + 1, 0).getDate();
+    let html = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => `<span class="weekday">${d}</span>`).join('');
+    for (let i=0; i<firstWeekday; i++) html += '<span class="calendar-blank"></span>';
+    for (let day=1; day<=last; day++) {
+      const key = `${year}-${pad(month + 1)}-${pad(day)}`;
+      const tally = counts(key);
+      const future = key > dateKey();
+      const scheduled = state.sessions.filter(session => sessionExercises(session.id, key).length);
+      const restOrComplete = scheduled.length > 0 && scheduled.every(session =>
+        sessionIsPaused(session.id, key) || sessionExercises(session.id, key).every(ex => done(key, ex.id, session.id)));
+      const kind = future || !tally.total ? 'empty' : tally.completed === tally.total ? 'completed'
+        : restOrComplete ? 'paused' : tally.completed ? 'partial' : key < dateKey() ? 'missed' : 'empty';
+      html += `<button type="button" class="calendar-day ${kind} ${key === dateKey() ? 'is-today' : ''} ${key === calendarSelected ? 'selected' : ''}" data-day="${key}" aria-label="${escapeHtml(key)}: ${tally.completed} of ${tally.total} exercises completed" aria-pressed="${key === calendarSelected}">${day}</button>`;
+    }
+    $('calendar-grid').innerHTML = html;
+    const {total,completed} = counts(calendarSelected);
+    const selectedLabel = new Date(`${calendarSelected}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    const pausedCount = state.sessions.filter(s => sessionIsPaused(s.id, calendarSelected) && sessionExercises(s.id,calendarSelected).length).length;
+    $('calendar-detail').textContent = `${selectedLabel}: ${total ? `${completed} of ${total} exercises logged` : 'No exercises scheduled'}${pausedCount ? ` · ${pausedCount} session${pausedCount===1?'':'s'} paused` : ''}.`;
+    $('next-month').disabled = year === new Date().getFullYear() && month === new Date().getMonth();
   }
 
   function renderManage() {
@@ -181,7 +248,7 @@
       const assigned = state.sessions.filter(s => ex.sessionIds.includes(s.id)).map(s => s.name).join(', ');
       return `<div class="exercise-manage"><div>
         <div class="manage-name">${escapeHtml(ex.name)}</div>
-        <div class="manage-meta">${escapeHtml(assigned || 'No sessions')}</div>
+        <div class="manage-meta">${escapeHtml(assigned || 'No sessions')}${youtubeVideoId(ex.video || '') ? ' · Video available' : ''}</div>
         </div><div class="manage-actions">
         <button type="button" class="btn-quiet edit-exercise" data-id="${escapeHtml(ex.id)}">Edit</button>
         <button type="button" class="btn-quiet btn-danger remove-exercise" data-id="${escapeHtml(ex.id)}">Remove</button>
@@ -199,6 +266,7 @@
   function renderReminders() {
     $('reminder-sessions').innerHTML = state.sessions.map(s => {
       const paused = Boolean(state.paused[`${dateKey()}_${s.id}`]);
+      const snoozed = Number(state.snoozedUntil[`${dateKey()}_${s.id}`] || 0) > Date.now();
       return `<form class="reminder-session" data-session="${escapeHtml(s.id)}">
         <div class="reminder-session-heading"><strong>${escapeHtml(s.name)}</strong>
           <button type="button" class="btn-quiet btn-danger remove-session" data-session="${escapeHtml(s.id)}" ${state.sessions.length === 1 ? 'disabled' : ''}>Remove</button>
@@ -207,7 +275,7 @@
           <label class="field">Name<input name="name" maxlength="40" required value="${escapeHtml(s.name)}" /></label>
           <label class="field">Exercise time<input type="text" class="clock-input" inputmode="none" readonly name="time" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.time)}" /></label>
           <label class="field">Repeat from<input type="text" class="clock-input" inputmode="none" readonly name="start" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.start)}" /></label>
-          <label class="field">Until<input type="text" class="clock-input" inputmode="none" readonly name="end" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.end)}" /></label>
+          <label class="field">Last reminder by<input type="text" class="clock-input" inputmode="none" readonly name="end" required aria-haspopup="dialog" title="Choose a time using the clock" value="${escapeHtml(s.end)}" /></label>
           <label class="field">Repeat every<select name="interval">
             ${[5, 10, 15, 30, 60].map(n => `<option value="${n}" ${Number(s.interval) === n ? 'selected' : ''}>${n} minutes</option>`).join('')}
           </select></label>
@@ -218,16 +286,19 @@
           <button type="button" class="btn-quiet toggle-pause" data-session="${escapeHtml(s.id)}">${paused ? 'Resume reminders today' : 'Pause reminders today'}</button>
         </div>
         ${paused ? '<p class="muted paused-note">Reminders are paused until tomorrow.</p>' : ''}
+        ${snoozed && !paused ? `<p class="muted paused-note">Snoozed until ${new Date(state.snoozedUntil[`${dateKey()}_${s.id}`]).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}. <button type="button" class="btn-quiet clear-snooze" data-session="${escapeHtml(s.id)}">Resume now</button></p>` : ''}
       </form>`;
     }).join('');
   }
 
   function renderSettings() {
     $('hourly-on').checked = Boolean(state.settings.hourlyOn);
+    $('final-on').checked = Boolean(state.settings.finalOn);
+    $('final-time').value = state.settings.finalTime || '22:30';
     $('quote-text').textContent = QUOTES[(state.quoteIndex || 0) % QUOTES.length];
     renderReminders();
   }
-  function render() { renderToday(); renderManage(); renderSettings(); }
+  function render() { renderToday(); renderCalendar(); renderManage(); renderSettings(); renderContacts(); }
 
   function closeExerciseForm() {
     $('exercise-form').hidden = true;
@@ -240,6 +311,7 @@
     $('exercise-form').hidden = false;
     $('exercise-name').value = ex?.name ?? '';
     $('exercise-notes').value = ex?.notes ?? '';
+    $('exercise-video').value = ex?.video ?? '';
     renderExerciseOptions(ex ? ex.sessionIds : state.sessions.map(s => s.id));
     $('save-btn').textContent = ex ? 'Update exercise' : 'Save exercise';
     $('exercise-name').focus();
@@ -255,11 +327,15 @@
     const sessionIds = [...document.querySelectorAll('input[name="exercise-session"]:checked')].map(input => input.value);
     if (!name || !sessionIds.length) { showToast('Choose at least one session.'); return; }
     const notes = $('exercise-notes').value.trim();
+    const video = $('exercise-video').value.trim();
+    if (video && !youtubeVideoId(video)) {
+      showToast('Please enter a valid YouTube video URL, or leave it blank.'); return;
+    }
     if (editingId) {
       const ex = state.exercises.find(x => x.id === editingId);
-      if (ex) Object.assign(ex, { name, notes, sessionIds });
+      if (ex) Object.assign(ex, { name, notes, video, sessionIds });
     } else {
-      state.exercises.push({ id: `ex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, name, notes, sessionIds, createdOn: dateKey(), archivedOn: null });
+      state.exercises.push({ id: `ex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, name, notes, video, sessionIds, createdOn: dateKey(), archivedOn: null });
     }
     save(); closeExerciseForm(); render(); showToast('Exercise saved.');
   });
@@ -283,12 +359,63 @@
     if (!state.log[day]) state.log[day] = {};
     if (input.checked) state.log[day][key] = true;
     else delete state.log[day][key];
-    save(); renderToday();
+    if (!input.checked && state.ratings[day]) delete state.ratings[day][key];
+    save(); renderToday(); renderCalendar();
+    if (input.checked) openRating(day, key);
     if (input.checked && remaining(input.dataset.session).length === 0) {
       const session = state.sessions.find(s => s.id === input.dataset.session);
       showToast(`${session?.name || 'Session'} complete! No more reminders for this session today.`);
     }
   });
+
+  // Optional per-exercise pain and difficulty rating (never required to check off an exercise).
+  for (const id of ['rating-pain','rating-difficulty']) {
+    $(id).innerHTML += Array.from({length:11}, (_, i) => `<option value="${i}">${i} / 10</option>`).join('');
+  }
+  function openRating(day, key) {
+    ratingTarget = {day,key};
+    const previous = state.ratings[day]?.[key];
+    $('rating-pain').value = previous?.pain === null || previous?.pain === undefined ? '' : String(previous.pain);
+    $('rating-difficulty').value = previous?.difficulty === null || previous?.difficulty === undefined ? '' : String(previous.difficulty);
+    $('rating-dialog').showModal();
+  }
+  $('today-sessions').addEventListener('click', event => {
+    const button = event.target.closest('.edit-rating');
+    if (button) openRating(dateKey(), logKey(button.dataset.exercise, button.dataset.session));
+  });
+  $('rating-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (ratingTarget) {
+      const {day,key} = ratingTarget;
+      if (!state.ratings[day]) state.ratings[day] = {};
+      state.ratings[day][key] = {
+        pain: $('rating-pain').value === '' ? null : Number($('rating-pain').value),
+        difficulty: $('rating-difficulty').value === '' ? null : Number($('rating-difficulty').value)
+      };
+      save(); renderToday();
+    }
+    $('rating-dialog').close();
+  });
+  $('skip-rating').addEventListener('click', () => $('rating-dialog').close());
+  $('rating-dialog').addEventListener('close', () => { ratingTarget = null; });
+
+  $('prev-month').addEventListener('click', () => {calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth()-1,1); renderCalendar();});
+  $('next-month').addEventListener('click', () => {calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth()+1,1); renderCalendar();});
+  $('calendar-grid').addEventListener('click', event => {
+    const button = event.target.closest('[data-day]');
+    if (button) { calendarSelected = button.dataset.day; renderCalendar(); }
+  });
+
+  // Embed only vetted YouTube IDs; do not store local video files or load remote content automatically.
+  document.addEventListener('click', event => {
+    const button = event.target.closest('.watch-video');
+    if (!button || !validVideoId(button.dataset.video)) return;
+    $('video-title').textContent = button.dataset.name || 'Exercise demonstration';
+    $('video-iframe').src = `https://www.youtube-nocookie.com/embed/${button.dataset.video}`;
+    $('video-dialog').showModal();
+  });
+  $('close-video').addEventListener('click', () => $('video-dialog').close());
+  $('video-dialog').addEventListener('close', () => { $('video-iframe').removeAttribute('src'); });
 
   // Consistent clock-style time picker (no browser-native time input or external library).
   // Values remain HH:mm so existing reminders and locally saved settings are unchanged.
@@ -444,6 +571,7 @@
   $('reminder-sessions').addEventListener('click', event => {
     const remove = event.target.closest('.remove-session');
     const pause = event.target.closest('.toggle-pause');
+    const resumeSnooze = event.target.closest('.clear-snooze');
     if (remove) {
       if (state.sessions.length <= 1) return;
       const session = state.sessions.find(s => s.id === remove.dataset.session);
@@ -454,6 +582,10 @@
       if (!$('exercise-form').hidden) closeExerciseForm();
       showToast('Session removed.');
     }
+    if (resumeSnooze) {
+      delete state.snoozedUntil[`${dateKey()}_${resumeSnooze.dataset.session}`];
+      save(); renderReminders(); showToast('Snooze cleared.');
+    }
     if (pause) {
       const key = `${dateKey()}_${pause.dataset.session}`;
       if (state.paused[key]) delete state.paused[key];
@@ -461,6 +593,12 @@
       save(); renderReminders();
       showToast(state.paused[key] ? 'Reminders paused for today.' : 'Reminders resumed.');
     }
+  });
+
+  $('save-final-settings').addEventListener('click', () => {
+    state.settings.finalOn = $('final-on').checked;
+    state.settings.finalTime = $('final-time').value;
+    save(); showToast('Evening check-in preferences saved.');
   });
 
   $('hourly-on').addEventListener('change', event => {
@@ -518,10 +656,11 @@
     // Reminder messages can vary without changing the header between rotations.
     return QUOTES[randomQuoteIndex(state.quoteIndex)];
   }
-  function sendReminder(session, pendingCount, isDemo = false) {
-    const title = `Physio Buddy · ${session.name} reminder${isDemo ? ' (demo)' : ''}`;
+  function sendReminder(session, pendingCount, isDemo = false, isLast = false) {
+    previewSessionId = session.id || state.sessions[0]?.id || null;
+    const title = `PhysioAlly · ${session.name} reminder${isDemo ? ' (demo)' : ''}`;
     const body = pendingCount
-      ? `${pendingCount} exercise${pendingCount === 1 ? '' : 's'} left in this session. ${nextQuote()}`
+      ? `${pendingCount} exercise${pendingCount === 1 ? '' : 's'} left in this session.${isLast ? ' This is the last scheduled reminder for this session.' : ''} ${nextQuote()}`
       : `A sample reminder for your ${session.name.toLowerCase()} session. ${nextQuote()}`;
     previewNotification(title, body);
     sendSystemNotification(title, body);
@@ -538,33 +677,233 @@
     save();
     if ('Notification' in window && Notification.permission === 'default') {
       const allowed = await askForNotificationPermission();
-      if (allowed) sendSystemNotification(`Physio Buddy · ${session?.name || 'Physiotherapy'} reminder (demo)`, $('preview-body').textContent);
+      if (allowed) sendSystemNotification(`PhysioAlly · ${session?.name || 'Physiotherapy'} reminder (demo)`, $('preview-body').textContent);
     }
   });
+
+  // Adaptive Ally: a choice-driven response, not an algorithm that tells people to exercise through pain.
+  function openBuddy(id = null) {
+    buddySessionId = state.sessions.find(s => s.id === id)?.id || state.sessions.find(s => remaining(s.id).length)?.id || state.sessions[0]?.id;
+    const session = state.sessions.find(s => s.id === buddySessionId);
+    $('buddy-subtitle').textContent = `${session?.name || 'Your'} session · What is getting in the way today?`;
+    $('buddy-reasons').hidden = false;
+    $('buddy-response').hidden = true;
+    $('buddy-response').innerHTML = '';
+    $('buddy-back').hidden = true;
+    $('notification-preview').hidden = true;
+    $('buddy-dialog').showModal();
+  }
+  $('preview-adapt').addEventListener('click', () => openBuddy(previewSessionId));
+  $('buddy-demo-btn').addEventListener('click', () => openBuddy());
+  $('buddy-close').addEventListener('click', () => $('buddy-dialog').close());
+  $('buddy-back').addEventListener('click', () => {
+    $('buddy-reasons').hidden = false;
+    $('buddy-response').hidden = true;
+    $('buddy-back').hidden = true;
+  });
+  $('buddy-reasons').addEventListener('click', event => {
+    const button = event.target.closest('[data-reason]');
+    if (!button) return;
+    const reason = button.dataset.reason;
+    const key = `${dateKey()}_${buddySessionId}`;
+    state.reasons[key] = reason;
+    save();
+    $('buddy-reasons').hidden = true;
+    $('buddy-response').hidden = false;
+    $('buddy-back').hidden = false;
+    const panel = $('buddy-response');
+    if (reason === 'busy') {
+      panel.innerHTML = `<strong>Let's find a better time.</strong><p>Pause reminders for a little while instead of receiving repeated alerts.</p><div class="buddy-buttons">${[15,30,60].map(n => `<button type="button" class="btn btn-secondary buddy-snooze" data-minutes="${n}">Snooze ${n} min</button>`).join('')}</div>`;
+    } else if (reason === 'forgot') {
+      panel.innerHTML = `<strong>Ready when you are.</strong><p>Your prescribed exercises are waiting in Today's exercises.</p><button type="button" class="btn buddy-view">View my exercises</button>`;
+    } else if (reason === 'pain') {
+      panel.innerHTML = `<strong>Your well-being comes first.</strong><p>You can pause reminders for today or contact someone you trust. Follow your physiotherapist's advice for pain or symptom changes; this app cannot decide whether exercise is safe.</p><div class="buddy-buttons"><button type="button" class="btn buddy-pause">Pause reminders for today</button><button type="button" class="btn btn-secondary buddy-contact">Contact someone</button></div>`;
+    } else {
+      panel.innerHTML = '<strong>Asking for help is okay.</strong><p>Choose a saved contact and preview a help request. The Send button only simulates sending for this demo.</p><button type="button" class="btn buddy-contact">Contact someone</button>';
+    }
+  });
+  $('buddy-response').addEventListener('click', async event => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.classList.contains('buddy-snooze')) {
+      const amount = Number(button.dataset.minutes);
+      state.snoozedUntil[`${dateKey()}_${buddySessionId}`] = Date.now() + amount * 60000;
+      save(); $('buddy-dialog').close(); showToast(`Reminders snoozed for ${amount} minutes.`);
+    } else if (button.classList.contains('buddy-pause')) {
+      state.paused[`${dateKey()}_${buddySessionId}`] = true;
+      save(); renderReminders(); $('buddy-dialog').close(); showToast('Reminders paused for this session today.');
+    } else if (button.classList.contains('buddy-view')) {
+      $('buddy-dialog').close(); $('today-card').scrollIntoView({behavior:'smooth',block:'start'});
+    } else if (button.classList.contains('buddy-contact')) {
+      const preference = state.reasons[`${dateKey()}_${buddySessionId}`] === 'pain' ? 'pain' : 'checkin';
+      $('buddy-dialog').close(); openHelp(null, preference);
+    }
+  });
+
+  // Trusted contacts are stored in the current browser, alongside the user's exercise data.
+  // Demo only: no SMS, WhatsApp or email is sent from the browser.
+  const HELP_TEMPLATES = {
+    checkin: 'Hi, I am having a difficult day with my pain. Could you please check in on me when you can? Thank you.',
+    pain: 'Hi, I am experiencing significant pain and need some assistance. Please contact me as soon as you can.',
+    tasks: 'Hi, my pain is making some tasks difficult today. Could you please help me with something? Thank you.'
+  };
+  function normalizedPhone(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (!/^\+?[0-9()\s.-]+$/.test(raw)) return null;
+    const normalized = raw.replace(/[()\s.-]/g, '');
+    const digits = normalized.replace(/\D/g, '');
+    return /^\+?\d+$/.test(normalized) && digits.length >= 7 && digits.length <= 15 ? normalized : null;
+  }
+  function renderContacts() {
+    $('contacts-list').innerHTML = state.contacts.length ? state.contacts.map(c => `
+      <div class="contact-item">
+        <div class="contact-info">
+          <div class="contact-name">${escapeHtml(c.name)}</div>
+          <div class="contact-detail">${c.phone ? escapeHtml(c.phone) : ''}${c.phone && c.email ? ' · ' : ''}${c.email ? escapeHtml(c.email) : ''}</div>
+        </div>
+        <div class="contact-buttons">
+          <button class="btn-quiet contact-help" data-id="${escapeHtml(c.id)}" type="button">Send demo</button>
+          <button class="btn-quiet contact-edit" data-id="${escapeHtml(c.id)}" type="button">Edit</button>
+          <button class="btn-quiet btn-danger contact-remove" data-id="${escapeHtml(c.id)}" type="button">Remove</button>
+        </div>
+      </div>`).join('') : '<div class="empty">No trusted contacts added yet.</div>';
+    $('request-help-btn').disabled = !state.contacts.length;
+    $('help-contact').innerHTML = state.contacts.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+  }
+  function closeContactForm() {
+    editingContactId = null;
+    $('contact-form').hidden = true;
+    $('contact-form').reset();
+    $('save-contact-btn').textContent = 'Save contact';
+  }
+  function openContactForm(contact = null) {
+    editingContactId = contact?.id || null;
+    $('contact-form').hidden = false;
+    $('contact-name').value = contact?.name || '';
+    $('contact-phone').value = contact?.phone || '';
+    $('contact-email').value = contact?.email || '';
+    $('save-contact-btn').textContent = contact ? 'Update contact' : 'Save contact';
+    $('contact-name').focus();
+  }
+  $('add-contact-btn').addEventListener('click', () => {
+    if (!$('contact-form').hidden && !editingContactId) closeContactForm();
+    else openContactForm();
+  });
+  $('cancel-contact-btn').addEventListener('click', closeContactForm);
+  $('contact-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const name = $('contact-name').value.trim();
+    const phone = $('contact-phone').value.trim();
+    const email = $('contact-email').value.trim();
+    if (!name) return;
+    if (!phone && !email) return showToast('Enter a phone number or an email address.');
+    if (phone && normalizedPhone(phone) === null) return showToast('Use a valid phone number, ideally with a country code (e.g. +65).');
+    const update = {name,phone,email};
+    if (editingContactId) {
+      const contact = state.contacts.find(c => c.id === editingContactId);
+      if (contact) Object.assign(contact,update);
+    } else {
+      state.contacts.push({id:`contact_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,...update});
+    }
+    save(); closeContactForm(); renderContacts(); showToast('Trusted contact saved in this browser.');
+  });
+  $('contacts-list').addEventListener('click',event => {
+    const button = event.target.closest('[data-id]');
+    if (!button) return;
+    const contact = state.contacts.find(c => c.id === button.dataset.id);
+    if (!contact) return;
+    if (button.classList.contains('contact-help')) openHelp(contact.id);
+    if (button.classList.contains('contact-edit')) openContactForm(contact);
+    if (button.classList.contains('contact-remove') && confirm(`Remove “${contact.name}” from support contacts?`)) {
+      state.contacts = state.contacts.filter(c => c.id !== contact.id);
+      save(); renderContacts(); showToast('Contact removed.');
+    }
+  });
+  function openHelp(contactId = null, template = 'checkin') {
+    if (!state.contacts.length) {
+      $('contacts-card').scrollIntoView({behavior:'smooth',block:'center'});
+      openContactForm();
+      showToast('Add a trusted contact first.');
+      return;
+    }
+    $('help-contact').innerHTML = state.contacts.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+    const selected = state.contacts.some(c => c.id === contactId) ? contactId : state.contacts[0].id;
+    $('help-contact').value = selected;
+    $('help-template').value = Object.hasOwn(HELP_TEMPLATES,template) ? template : 'checkin';
+    $('help-message').value = HELP_TEMPLATES[$('help-template').value];
+    $('help-compose').hidden = false;
+    $('help-success').hidden = true;
+    $('help-dialog').showModal();
+  }
+  $('request-help-btn').addEventListener('click', () => openHelp());
+  $('high-pain-help').addEventListener('click', () => openHelp(null,'pain'));
+  $('help-template').addEventListener('change', () => {
+    $('help-message').value = HELP_TEMPLATES[$('help-template').value];
+  });
+  $('help-cancel').addEventListener('click', () => $('help-dialog').close());
+  $('help-success-close').addEventListener('click', () => $('help-dialog').close());
+  $('help-send').addEventListener('click', () => {
+    const contact = state.contacts.find(c => c.id === $('help-contact').value);
+    const message = $('help-message').value.trim();
+    if (!contact) return showToast('Choose a saved contact first.');
+    if (!message) return showToast('Please enter a message.');
+    // This is a deliberately simulated send for the classroom prototype.
+    // Never claim real delivery, or trigger a phone or messaging app.
+    $('help-success-recipient').textContent = `To: ${contact.name}`;
+    $('help-compose').hidden = true;
+    $('help-success').hidden = false;
+    $('help-success-title').focus();
+  });
+  // Preview messages should remain opt-in; never send texts based solely on a pain score.
+  $('help-dialog').addEventListener('click',event => { if (event.target === $('help-dialog')) $('help-dialog').close(); });
 
   function checkReminders() {
     const now = new Date(), day = dateKey(now);
     const at = now.getHours() * 60 + now.getMinutes();
     let changed = false;
-    for (const s of state.sessions) {
-      if (!s.enabled || state.paused[`${day}_${s.id}`] || !remaining(s.id, day).length) continue;
-      const from = minutes(s.start), until = minutes(s.end);
-      const gap = Number(s.interval);
-      if (!gap || at < from || at > until) continue;
-      // Every X minutes starting at 'Repeat from' — up to and including 'Until'.
-      // If the tab was sleeping, only the latest due reminder is sent on return.
+    for (const session of state.sessions) {
+      if (!session.enabled || sessionIsPaused(session.id, day) || !remaining(session.id, day).length) continue;
+      if (Date.now() < Number(state.snoozedUntil[`${day}_${session.id}`] || 0)) continue;
+      const from = minutes(session.start), until = minutes(session.end);
+      const gap = Number(session.interval);
+      if (!gap || !Number.isFinite(from) || !Number.isFinite(until) || at < from || at > until) continue;
+      const key = `${day}_${session.id}`;
+      // Deliver an explicit last reminder at the cutoff, even if it falls between repeat intervals.
+      if (at === until) {
+        if (state.lastSent[`${key}_last`]) continue;
+        state.lastSent[`${key}_last`] = true;
+        sendReminder(session, remaining(session.id, day).length, false, true);
+        changed = true;
+        continue;
+      }
       const slot = Math.floor((at - from) / gap);
-      const key = `${day}_${s.id}`;
       if (state.lastSent[key] === slot) continue;
       state.lastSent[key] = slot;
-      sendReminder(s, remaining(s.id, day).length);
+      sendReminder(session, remaining(session.id, day).length);
       changed = true;
+    }
+    // One optional bedtime check-in for unfinished sessions that have already been scheduled.
+    if (state.settings.finalOn && state.finalSent !== day) {
+      const finalAt = minutes(state.settings.finalTime || '22:30');
+      if (at >= finalAt && at <= finalAt + 15) {
+        const pending = state.sessions.filter(s => minutes(s.time) <= at && !sessionIsPaused(s.id,day))
+          .reduce((sum,s) => sum + remaining(s.id, day).length, 0);
+        state.finalSent = day;
+        if (pending) {
+          const body = `${pending} scheduled exercise${pending===1?' is':'s are'} still unchecked today. If you can follow your prescribed plan safely, there's time to review it. It is also okay to rest when needed.`;
+          previewSessionId = state.sessions.find(s => remaining(s.id,day).length)?.id || state.sessions[0]?.id;
+          previewNotification('PhysioAlly · Evening check-in', body);
+          sendSystemNotification('PhysioAlly · Evening check-in',body);
+        }
+        changed = true;
+      }
     }
     if (state.settings.hourlyOn && (!state.lastHourly || Date.now() - state.lastHourly >= 60 * 60 * 1000)) {
       state.lastHourly = Date.now();
       const body = nextQuote();
-      previewNotification('Physio Buddy · A little motivation', body);
-      sendSystemNotification('Physio Buddy · A little motivation', body);
+      previewNotification('PhysioAlly · A little motivation', body);
+      sendSystemNotification('PhysioAlly · A little motivation', body);
       changed = true;
     }
     if (changed) save();

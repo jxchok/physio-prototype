@@ -4,15 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light" />
-  <title>Physio Buddy — Physiotherapy Tracker</title>
-  <link rel="stylesheet" href="style.css" />
-  <script src="script.js" defer></script>
+  <title>PhysioAlly — Physiotherapy Tracker</title>
+  <link rel="stylesheet" href="style.css?v=7.0" />
+  <script src="script.js?v=7.0" defer></script>
 </head>
 <body>
   <header>
     <div class="wrap top">
       <div class="header-identity">
-        <div class="brand">Physio Buddy</div>
+        <div class="brand">PhysioAlly</div>
         <span class="top-note">Physiotherapy tracker · Prototype</span>
       </div>
       <div class="header-motivation" aria-label="Motivational quote">
@@ -40,7 +40,27 @@
           </div>
           <div class="track-label"><span>Today's progress</span><span id="progress-percent">0%</span></div>
           <div class="track"><span id="progress-bar"></span></div>
+          <div id="high-pain-support" class="support-nudge" hidden>
+            <strong>Need someone to check in?</strong>
+            <p>You logged a higher pain level today. If you need assistance, you can choose to contact someone you trust.</p>
+            <button type="button" class="btn btn-secondary" id="high-pain-help">Request help</button>
+          </div>
           <div id="today-sessions"></div>
+        </section>
+
+        <section class="card" aria-labelledby="calendar-heading">
+          <div class="card-head">
+            <h2 id="calendar-heading">Progress calendar</h2>
+            <div class="calendar-nav">
+              <button type="button" class="btn-quiet" id="prev-month" aria-label="Previous month">‹</button>
+              <strong id="calendar-month"></strong>
+              <button type="button" class="btn-quiet" id="next-month" aria-label="Next month">›</button>
+            </div>
+          </div>
+          <p class="section-note">See completed, partial and missed exercise days. Select a day to view its progress.</p>
+          <div class="calendar-grid" id="calendar-grid" aria-label="Monthly exercise calendar"></div>
+          <div class="calendar-legend"><span><i class="legend-dot completed"></i>Complete</span><span><i class="legend-dot partial"></i>Partial</span><span><i class="legend-dot paused"></i>Paused</span><span><i class="legend-dot missed"></i>Not logged</span></div>
+          <p class="calendar-detail" id="calendar-detail" aria-live="polite"></p>
         </section>
 
         <section class="card" aria-labelledby="manage-heading">
@@ -58,6 +78,9 @@
                 <legend>Include in sessions</legend>
                 <div id="exercise-session-options"></div>
               </fieldset>
+              <label class="field">Exercise demo (YouTube link, optional)
+                <input id="exercise-video" type="url" placeholder="https://www.youtube.com/watch?v=..." />
+              </label>
               <label class="field">Notes (optional)
                 <textarea id="exercise-notes" maxlength="400" placeholder="Instructions from your physiotherapist"></textarea>
               </label>
@@ -77,7 +100,7 @@
             <h2 id="reminder-heading">Sessions & reminders</h2>
             <button class="btn btn-secondary" type="button" id="add-session-btn">+ Add session</button>
           </div>
-          <p class="section-note">Set any number of sessions per day. Reminders repeat within the time window until all exercises in that session are checked off.</p>
+          <p class="section-note">Set sessions, reminder intervals and a last-reminder cutoff for each session. Repeats stop once all exercises are completed or reminders are paused.</p>
           <form id="add-session-form" class="form" hidden>
             <div class="form-grid two-fields">
               <label class="field">Session name
@@ -93,12 +116,55 @@
             </div>
           </form>
           <div id="reminder-sessions"></div>
+          <div class="buddy-intro">
+            <div><strong>Adaptive Ally</strong><p>Busy, in pain, or need help? Choose a response instead of receiving the same reminder.</p></div>
+            <button type="button" class="btn btn-secondary" id="buddy-demo-btn">Try Adaptive Ally</button>
+          </div>
+          <div class="last-reminder-settings">
+            <label class="toggle-row"><input id="final-on" type="checkbox" /> Evening check-in for unfinished exercises</label>
+            <div class="last-reminder-row">
+              <label class="field">Check-in time (before bed)
+                <input id="final-time" class="clock-input" type="text" inputmode="none" readonly value="22:30" aria-haspopup="dialog" title="Choose a time using the clock" />
+              </label>
+              <button type="button" class="btn btn-secondary" id="save-final-settings">Save check-in</button>
+            </div>
+            <p class="muted">Optional. One gentle final check-in per day, while the website is open. It won't remind you about paused sessions.</p>
+          </div>
           <div class="notification-actions">
             <button type="button" class="btn btn-secondary" id="notification-btn">Enable notifications</button>
             <button type="button" class="btn" id="test-notification-btn">Test notification</button>
           </div>
           <label class="toggle-row quote-toggle"><input id="hourly-on" type="checkbox" /> Hourly encouragement notifications (while page is open)</label>
           <p class="muted" id="notification-status">The test button always opens a notification preview. System notifications need browser permission and HTTPS. Timed reminders only run while this page is open.</p>
+        </section>
+
+        <section class="card" aria-labelledby="contacts-heading" id="contacts-card">
+          <div class="card-head">
+            <h2 id="contacts-heading">Emergency & support contacts</h2>
+            <button type="button" class="btn btn-secondary" id="add-contact-btn">+ Add contact</button>
+          </div>
+          <p class="section-note">Save trusted people for your support network. This prototype demonstrates how a help request would work.</p>
+          <form id="contact-form" class="form" hidden>
+            <div class="form-grid">
+              <label class="field">Name
+                <input id="contact-name" type="text" maxlength="80" autocomplete="off" placeholder="e.g. Family member" required />
+              </label>
+              <label class="field">Phone number (optional; include country code for WhatsApp)
+                <input id="contact-phone" type="tel" maxlength="25" autocomplete="off" placeholder="e.g. +65 8123 4567" />
+              </label>
+              <label class="field">Email address (optional)
+                <input id="contact-email" type="email" maxlength="120" autocomplete="off" placeholder="e.g. someone@example.com" />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn" id="save-contact-btn">Save contact</button>
+              <button type="button" class="btn btn-secondary" id="cancel-contact-btn">Cancel</button>
+            </div>
+          </form>
+          <div id="contacts-list"></div>
+          <button type="button" class="btn support-main-action" id="request-help-btn">Request help</button>
+          <p class="muted"><strong>Demo only:</strong> pressing Send shows a confirmation screen. No real SMS, email or emergency alert is delivered. Contacts stay in this browser.</p>
+          <p class="safety-note"><strong>Urgent symptoms?</strong> Severe or worsening pain accompanied by new leg weakness, numbness around the groin, or loss of bladder/bowel control needs urgent medical assessment. Do not wait for a contact to respond. In Singapore, call 995 for an emergency ambulance.</p>
         </section>
       </div>
     </div>
@@ -129,14 +195,84 @@
     </div>
   </dialog>
 
+  <!-- Optional exercise feedback after checking off an exercise -->
+  <dialog id="rating-dialog" class="simple-dialog" aria-labelledby="rating-title">
+    <form id="rating-form" method="dialog">
+      <h2 id="rating-title">Optional exercise check-in</h2>
+      <p class="muted">You can leave either score blank. Logging a score does not change medical advice.</p>
+      <label class="field">Pain experienced (0–10, optional)
+        <select id="rating-pain"><option value="">Not recorded</option></select>
+      </label>
+      <label class="field">Exercise difficulty (0–10, optional)
+        <select id="rating-difficulty"><option value="">Not recorded</option></select>
+      </label>
+      <div class="form-actions"><button type="button" class="btn btn-secondary" id="skip-rating">Skip</button><button type="submit" class="btn">Save feedback</button></div>
+    </form>
+  </dialog>
+
+  <!-- Optional embedded YouTube demonstration; video is loaded only when requested. -->
+  <dialog id="video-dialog" class="simple-dialog video-dialog" aria-labelledby="video-title">
+    <div class="video-head"><h2 id="video-title">Exercise demonstration</h2><button type="button" class="btn-quiet" id="close-video">Close ×</button></div>
+    <div class="video-frame"><iframe id="video-iframe" title="YouTube exercise demonstration" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>
+    <p class="muted">Only use demonstrations appropriate to your clinician-prescribed exercise plan. Videos are supplied by the user, not verified by this website.</p>
+  </dialog>
+
+  <!-- Adaptive Ally asks about a missed session and offers user-controlled options. -->
+  <dialog id="buddy-dialog" class="simple-dialog buddy-dialog" aria-labelledby="buddy-title">
+    <h2 id="buddy-title">Adaptive Ally</h2>
+    <p class="section-note" id="buddy-subtitle">What is getting in the way today?</p>
+    <div id="buddy-reasons" class="buddy-options">
+      <button type="button" class="buddy-option" data-reason="busy">I'm busy right now</button>
+      <button type="button" class="buddy-option" data-reason="forgot">I forgot / I'm ready now</button>
+      <button type="button" class="buddy-option" data-reason="pain">I'm in pain / need to rest</button>
+      <button type="button" class="buddy-option" data-reason="support">I could use some support</button>
+    </div>
+    <div id="buddy-response" class="buddy-response" hidden></div>
+    <div class="form-actions"><button type="button" class="btn btn-secondary" id="buddy-back" hidden>Back</button><button type="button" class="btn btn-secondary" id="buddy-close">Close</button></div>
+  </dialog>
+
+  <!-- Presentation demo: explicitly simulated sending; no messages leave the browser. -->
+  <dialog id="help-dialog" class="simple-dialog help-dialog" aria-labelledby="help-title">
+    <div id="help-compose">
+      <h2 id="help-title">Request support</h2>
+      <p class="section-note">Choose a saved contact and prepare a help request.</p>
+      <label class="field">Emergency / support contact
+        <select id="help-contact"></select>
+      </label>
+      <label class="field">Message type
+        <select id="help-template">
+          <option value="checkin">Could you check in on me?</option>
+          <option value="pain">I'm in significant pain and need help</option>
+          <option value="tasks">Could you help with a task?</option>
+        </select>
+      </label>
+      <label class="field">Message
+        <textarea id="help-message" maxlength="700" rows="4" aria-label="Message to your trusted contact"></textarea>
+      </label>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="help-cancel">Cancel</button>
+        <button type="button" class="btn" id="help-send">Send</button>
+      </div>
+      <p class="muted"><strong>Simulation only.</strong> Clicking Send will show a confirmation; it will not contact anyone.</p>
+    </div>
+    <div id="help-success" class="help-success" hidden role="status" aria-live="polite">
+      <div class="help-success-icon" aria-hidden="true">✓</div>
+      <h2 id="help-success-title" tabindex="-1">Message sent!</h2>
+      <p id="help-success-recipient" class="help-success-recipient"></p>
+      <p class="demo-disclaimer"><strong>Demo only:</strong> no real message or emergency alert was sent.</p>
+      <div class="form-actions"><button type="button" class="btn" id="help-success-close">Done</button></div>
+    </div>
+    <p class="safety-note">Not an emergency alert service. If immediate medical help is needed, contact local emergency services directly.</p>
+  </dialog>
+
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <aside id="notification-preview" class="notification-preview" role="status" aria-live="polite" hidden>
     <div class="preview-heading">
-      <strong id="preview-title">Physio Buddy</strong>
+      <strong id="preview-title">PhysioAlly</strong>
       <button id="close-preview" class="close-preview" type="button" aria-label="Close notification preview">×</button>
     </div>
     <p id="preview-body"></p>
-    <button type="button" class="preview-link" id="preview-open">View exercises</button>
+    <div class="preview-actions"><button type="button" class="preview-link" id="preview-open">View exercises</button><button type="button" class="preview-link" id="preview-adapt">Not now? Tell Ally why</button></div>
   </aside>
 </body>
 </html>
