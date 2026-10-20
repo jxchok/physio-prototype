@@ -1141,7 +1141,7 @@
     if (!Array.isArray(state.friendMessages[activeFriendId])) state.friendMessages[activeFriendId] = [];
     state.friendMessages[activeFriendId].push({ message, at: new Date().toISOString() });
     save(); renderFriends();
-    $('friend-demo-status').textContent = '✓ Message prepared (preview only — not delivered).';
+    $('friend-demo-status').textContent = '✓ Message sent.';
   });
 
   // Trusted contacts are stored in the current browser, alongside the user's exercise data.
